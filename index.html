@@ -1,17 +1,5 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#08101c">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="地点撒点地图">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>地点撒点地图</title>
+<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -156,7 +144,7 @@ main { min-width: 0; display: grid; gap: 10px; position: sticky; top: max(16px, 
       <label>模拟总时长（小时）<input type="number" id="sunSpan" value="72" min="1" max="720" step="1"></label>
     </div>
     <label class="check"><input type="checkbox" id="glow" checked> 大气辉光</label>
-    <label class="check"><input type="checkbox" id="real" checked> 真实地球配色（地球仪：深蓝海洋、植被/沙漠/冰雪陆地、云层）</label>
+    <label>地球仪渲染风格<select id="gstyle"><option value="google" selected>Google 地图风格（浅色陆地、淡蓝海洋、大气薄雾）</option><option value="real">卫星真实地球（植被、沙漠、冰雪、云层）</option><option value="plain">跟随配色主题（深色 / 浅色）</option></select></label>
     <label class="check"><input type="checkbox" id="stars" checked> 星空背景（地球仪投影；浅色配色下背景也改为夜空；镜头转动时有视差，星光会闪烁）</label>
     <label class="check"><input type="checkbox" id="dof" checked> 起降景深推近（落地时镜头推近目的地，起飞时拉远）</label>
     <label>推近强度（0 = 不放大）<input type="number" id="zoomK" value="0.3" min="0" max="1.5" step="0.05"></label>
@@ -2538,14 +2526,15 @@ function nightShade(x, p, path, th, SM) {
   cx.putImageData(img, 0, 0); blitSmooth(x, path, c, SM);
 }
 // ---- 真实地球配色：按经纬度程序化生成陆地色（植被/沙漠/雨林/苔原/冰雪）和云层 ----
-let EMAP = null;
-function earthMap() {
-  if (EMAP) return EMAP;
+const EMAPS = {};
+function earthMap(goog) {
+  const ek = goog ? "g" : "r"; if (EMAPS[ek]) return EMAPS[ek];
   const w = 720, h = 360, col = new Uint8ClampedArray(w * h * 3), cl = new Uint8ClampedArray(w * h);
   const hash = (a, b) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
   const vn = (x, y) => { const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
     return (hash(ix, iy) * (1 - u) + hash(ix + 1, iy) * u) * (1 - v) + (hash(ix, iy + 1) * (1 - u) + hash(ix + 1, iy + 1) * u) * v; };
-  const BASE = [78, 104, 56], DES = [196, 166, 114], FOR = [24, 70, 36], BOR = [52, 78, 58], SAV = [150, 142, 78], ICE = [240, 245, 250], HIL = [128, 108, 84];
+  const BASE = goog ? [238, 234, 224] : [78, 104, 56], DES = goog ? [243, 229, 200] : [196, 166, 114], FOR = goog ? [196, 218, 176] : [24, 70, 36], BOR = goog ? [216, 226, 206] : [52, 78, 58],
+    SAV = goog ? [228, 226, 188] : [150, 142, 78], ICE = goog ? [255, 255, 255] : [240, 245, 250], HIL = goog ? [229, 217, 201] : [128, 108, 84];
   const B = [ // 经度, 纬度, σ经度, σ纬度, 颜色, 强度
     [10, 24, 26, 7, DES, 1], [27, 24, 12, 6, DES, 1], [45, 24, 9, 6, DES, 1], [56, 32, 9, 5, DES, .75], [103, 43, 15, 4, DES, .9], [84, 40, 8, 3, DES, .8], [134, -25, 13, 7, DES, 1],
     [20, -23, 7, 4, DES, .9], [71, 27, 5, 3, DES, .8], [-112, 34, 7, 4, DES, .85], [-70, -24, 3, 6, DES, .8], [-69, -44, 4, 7, DES, .55], [-5, 18, 14, 4, DES, .8],
@@ -2561,23 +2550,23 @@ function earthMap() {
       const lon = (i + .5) / 2 - 180, c = BASE.slice();
       for (const [bx, by, sx, sy, tc, st] of B) { let dl = Math.abs(lon - bx); if (dl > 180) dl = 360 - dl; const e = (dl / sx) * (dl / sx) + ((lat - by) / sy) * ((lat - by) / sy); if (e < 12) mixc(c, tc, st * Math.exp(-e / 2)); }
       let it = (Math.abs(lat) - 63) / 9; it = it < 0 ? 0 : it > 1 ? 1 : it; mixc(c, ICE, it * it * (3 - 2 * it));
-      const tex = .88 + .24 * vn(lon / 3, lat / 3), o = (j * w + i) * 3; col[o] = c[0] * tex; col[o + 1] = c[1] * tex; col[o + 2] = c[2] * tex;
+      const tex = goog ? .975 + .05 * vn(lon / 3, lat / 3) : .88 + .24 * vn(lon / 3, lat / 3), o = (j * w + i) * 3; col[o] = c[0] * tex; col[o + 1] = c[1] * tex; col[o + 2] = c[2] * tex;
       let n = .55 * vn(lon / 13 + 5, lat / 11 + 9) + .3 * vn(lon / 5 + 2, lat / 4.5 + 1) + .15 * vn(lon / 2 + 7, lat / 2 + 3);
       n += .12 * Math.cos((Math.abs(lat) - 8) * Math.PI / 30) * (Math.abs(lat) < 75 ? 1 : 0);   // 赤道辐合带与中纬度多云
       let t = (n - .56) / .24; t = t < 0 ? 0 : t > 1 ? 1 : t; cl[j * w + i] = Math.round(t * t * (3 - 2 * t) * 150);
     }
   }
-  return EMAP = { w, h, col, cl };
+  return EMAPS[ek] = { w, h, col, cl };
 }
-function earthLayers(SM) {
-  const E = earthMap(), lc = sampleCanvas(1, SM), cc = document.createElement("canvas"); cc.width = SM.w; cc.height = SM.h;
+function earthLayers(SM, goog) {
+  const E = earthMap(goog), lc = sampleCanvas(1, SM), cc = document.createElement("canvas"); cc.width = SM.w; cc.height = SM.h;
   const lx = lc.getContext("2d"), cx = cc.getContext("2d"), li = lx.createImageData(SM.w, SM.h), ci = cx.createImageData(SM.w, SM.h), a = li.data, b = ci.data;
   for (let j = SM.y0; j <= SM.y1; j++) for (let i = SM.x0; i <= SM.x1; i++) {
     const o = j * SM.w + i; if (!SM.ok[o]) continue;
     let ei = Math.floor((SM.lon[o] + 180) * 2), ej = Math.floor((90 - SM.lat[o]) * 2); ei = ((ei % E.w) + E.w) % E.w; ej = ej < 0 ? 0 : ej >= E.h ? E.h - 1 : ej;
     const m = ej * E.w + ei, q = o * 4; a[q] = E.col[m * 3]; a[q + 1] = E.col[m * 3 + 1]; a[q + 2] = E.col[m * 3 + 2]; a[q + 3] = 255; b[q] = b[q + 1] = b[q + 2] = 255; b[q + 3] = E.cl[m];
   }
-  lx.putImageData(li, 0, 0); cx.putImageData(ci, 0, 0); return { land: lc, cloud: cc };
+  lx.putImageData(li, 0, 0); cx.putImageData(ci, 0, 0); return { land: lc, cloud: goog ? null : cc };
 }
 // 星空：固定随机星点，随相机经纬度做视差平移；闪烁相位由 TWK 决定
 let STARS = null, TWK = 0;
@@ -2598,6 +2587,7 @@ function drawStars(x) {
 const skyOn = () => projKey() === "ortho" && $("stars").checked && $("theme").value === "light";
 let HUDE = null;   // 地图切换过渡中：区域地图所占的混合比例 E（>=0.5 时标题用浅色配色会看不清，故改回主题色）
 const hudC = () => (HUDE != null ? (isGlobeAuto() && $("stars").checked && $("theme").value === "light" && HUDE < .5) : skyOn()) ? THEMES.dark : theme();
+const googleOn = () => projKey() === "ortho" && $("gstyle").value === "google";
 function fmtDur(km, mode) {
   const h = km / ({ plane: 800, train: 200, car: 70 }[mode] || 800) + (mode === "plane" || !mode ? .7 : 0);
   if (h < 1) return Math.max(1, Math.round(h * 60)) + " 分钟";
@@ -2716,7 +2706,7 @@ function makeProj0() {
 }
 const BC = new Map();
 function getBase(s) {
-  const noC = PTF || (isGlobeAuto() && projKey() === "ortho"), key = [PTF ? "T" : "", projKey(), $("lon0").value, $("lat0").value, $("theme").value, $("grat").checked, $("borders").checked, $("noant").checked, $("provNames").checked, $("glow").checked, $("real").checked, $("stars").checked, s].join("|");
+  const noC = PTF || (isGlobeAuto() && projKey() === "ortho"), key = [PTF ? "T" : "", projKey(), $("lon0").value, $("lat0").value, $("theme").value, $("grat").checked, $("borders").checked, $("noant").checked, $("provNames").checked, $("glow").checked, $("gstyle").value, $("stars").checked, s].join("|");
   if (!noC && BC.has(key)) return BC.get(key);
   const th = theme(), c = document.createElement("canvas"); c.width = Math.round(W * s); c.height = Math.round(H * s);
   const x = c.getContext("2d"); x.scale(s, s);
@@ -2744,23 +2734,29 @@ function getBase(s) {
     drawStars(x);
   }
   if (isO && $("glow").checked) { const [tx, ty] = p.translate(), R = p.scale(), g = x.createRadialGradient(tx, ty, R * .97, tx, ty, R * 1.13);
-    g.addColorStop(0, "rgba(110,185,255,.55)"); g.addColorStop(.3, "rgba(70,140,240,.24)"); g.addColorStop(1, "rgba(40,100,220,0)");
+    if ($("gstyle").value === "google" && isO) { g.addColorStop(0, "rgba(190,225,255,.8)"); g.addColorStop(.3, "rgba(150,200,255,.3)"); g.addColorStop(1, "rgba(120,180,255,0)"); }
+    else { g.addColorStop(0, "rgba(110,185,255,.55)"); g.addColorStop(.3, "rgba(70,140,240,.24)"); g.addColorStop(1, "rgba(40,100,220,0)"); }
     x.fillStyle = g; x.beginPath(); x.arc(tx, ty, R * 1.13, 0, 6.2832); x.fill(); }
-  const real = isO && $("real").checked, night = isO && isGlobeAuto() && $("sun").checked && SIMT != null, SM = (real || night) ? globeSamples(p) : null;
+  const gs = isO ? $("gstyle").value : "plain", real = gs === "real", goog = gs === "google", night = isO && isGlobeAuto() && $("sun").checked && SIMT != null, SM = (real || goog || night) ? globeSamples(p) : null;
   x.beginPath(); path({ type: "Sphere" });
   if (real) { const [tx, ty] = p.translate(), R = p.scale(), g = x.createRadialGradient(tx - R * .15, ty - R * .15, 0, tx, ty, R); g.addColorStop(0, "#0d3470"); g.addColorStop(.7, "#0b2c63"); g.addColorStop(1, "#143f80"); x.fillStyle = g; }
+  else if (goog) { const [tx, ty] = p.translate(), R = p.scale(), g = x.createRadialGradient(tx - R * .2, ty - R * .2, 0, tx, ty, R); g.addColorStop(0, "#b4dafc"); g.addColorStop(.7, "#a6cff4"); g.addColorStop(1, "#8bb8e6"); x.fillStyle = g; }
   else x.fillStyle = th.ocean;
   x.fill();
-  if ($("grat").checked) { x.beginPath(); path(d3.geoGraticule10()); x.strokeStyle = real ? "rgba(255,255,255,.07)" : th.grid; x.lineWidth = 0.8; x.stroke(); }
+  if ($("grat").checked) { x.beginPath(); path(d3.geoGraticule10()); x.strokeStyle = real ? "rgba(255,255,255,.07)" : goog ? "rgba(255,255,255,.3)" : th.grid; x.lineWidth = 0.8; x.stroke(); }
   x.beginPath(); LAND.forEach(f => { if ($("noant").checked && f.properties && f.properties.name === "Antarctica") return; path(f); });
-  if (real) { const L = earthLayers(SM); x.save(); x.clip(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(L.land, 0, 0, SM.w * SM.K, SM.h * SM.K); x.restore(); window.__cl = L.cloud; }
+  if (real || goog) { const L = earthLayers(SM, goog); x.save(); x.clip(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(L.land, 0, 0, SM.w * SM.K, SM.h * SM.K); x.restore(); window.__cl = L.cloud; }
   else { x.fillStyle = th.land; x.fill(); }
-  if ($("borders").checked) { x.beginPath(); path(BORDER); x.strokeStyle = real ? "rgba(255,255,255,.22)" : th.border; x.lineWidth = real ? .5 : 0.6; x.stroke(); }
+  if ($("borders").checked) { x.beginPath(); path(BORDER); x.strokeStyle = real ? "rgba(255,255,255,.22)" : goog ? "rgba(140,132,156,.8)" : th.border; x.lineWidth = real ? .5 : goog ? .7 : 0.6; x.stroke(); }
   if (real && window.__cl) { blitSmooth(x, path, window.__cl, SM); window.__cl = null; }
   if (night) nightShade(x, p, path, th, SM);
-  if (isO && $("glow").checked) { const [tx, ty] = p.translate(), R = p.scale(), g = x.createRadialGradient(tx, ty, R * .78, tx, ty, R);
+  if (goog) { // 受光明暗 + 边缘大气薄雾
+    const [tx, ty] = p.translate(), R = p.scale(); let g = x.createRadialGradient(tx - R * .35, ty - R * .35, R * .1, tx, ty, R * 1.05);
+    g.addColorStop(0, "rgba(255,255,255,.16)"); g.addColorStop(.55, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(25,50,100,.26)"); x.fillStyle = g; x.beginPath(); path({ type: "Sphere" }); x.fill();
+    if ($("glow").checked) { g = x.createRadialGradient(tx, ty, R * .86, tx, ty, R); g.addColorStop(0, "rgba(200,230,255,0)"); g.addColorStop(1, "rgba(200,230,255,.55)"); x.fillStyle = g; x.beginPath(); path({ type: "Sphere" }); x.fill(); }
+  } else if (isO && $("glow").checked) { const [tx, ty] = p.translate(), R = p.scale(), g = x.createRadialGradient(tx, ty, R * .78, tx, ty, R);
     g.addColorStop(0, "rgba(120,190,255,0)"); g.addColorStop(1, "rgba(120,190,255,.26)"); x.fillStyle = g; x.beginPath(); path({ type: "Sphere" }); x.fill(); }
-  x.beginPath(); path({ type: "Sphere" }); x.strokeStyle = real ? "rgba(150,200,255,.35)" : th.border; x.lineWidth = 1.2; x.stroke();
+  x.beginPath(); path({ type: "Sphere" }); x.strokeStyle = real ? "rgba(150,200,255,.35)" : goog ? "rgba(255,255,255,.45)" : th.border; x.lineWidth = 1.2; x.stroke();
   if (!noC) { BC.set(key, c); if (BC.size > 6) BC.delete(BC.keys().next().value); } return c;
 }
 let LAST = { pts: [] };
@@ -2861,7 +2857,7 @@ function drawScene(ctx, s, n, recent, track, frac) {
   return nn;
 }
 function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
-  const th = theme(), p = makeProj(), N = STEPS.length, ptC = $("ptColor").value, ringC = $("ringColor").value;
+  const th = theme(), p = makeProj(), N = STEPS.length, ptC = $("ptColor").value, ringC = $("ringColor").value, gl = googleOn(), vth = gl ? { ...th, text: "#14233f", bg: "#ffffff" } : th;
   ctx.drawImage(getBase(s), 0, 0);
   const plane = $("plane").checked && N > 1 && frac != null; let leg = 0, u = 0, ph = -1;
   if (plane) { const tl = timelineAt(frac); leg = tl.leg; u = tl.u; ph = tl.ph; n = tl.n; recent = 1; }
@@ -2897,6 +2893,7 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
         const K = Math.max(2, Math.ceil(60 * u)); for (let k = 0; k <= K; k++) cs.push(ip(u * k / K));
         segs[STEPS[leg + 1].mode || "plane"].push(cs);
       }
+      if (gl) { ctx.save(); ctx.strokeStyle = "rgba(20,40,90,.5)"; ctx.lineWidth = 3.4; ctx.lineCap = "round"; ctx.beginPath(); [...segs.plane, ...segs.train, ...segs.car].forEach(c => path({ type: "LineString", coordinates: c })); ctx.stroke(); ctx.restore(); }
       strokeSegs(ctx, path, segs, ptC, th);
       if (CINE.ph === "outro") { const k = clamp01(CINE.t * 4); ctx.save(); ctx.shadowColor = ptC; ctx.shadowBlur = 12 * k; ctx.strokeStyle = ptC; ctx.lineWidth = 1.8 + 1.4 * k; ctx.globalAlpha = .75 * k; ctx.lineCap = "round";
         ctx.beginPath(); [...segs.plane, ...segs.train, ...segs.car].forEach(c => path({ type: "LineString", coordinates: c })); ctx.stroke(); ctx.restore(); }
@@ -2913,7 +2910,7 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
     }
     if ($("labels").checked && !lite) {
       const fs = Math.max(7, +$("lblSize").value || 12), placed = [];
-      ctx.font = `${fs}px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif`; ctx.textBaseline = "middle"; ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = th.halo;
+      ctx.font = `${fs}px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif`; ctx.textBaseline = "middle"; ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = gl ? "rgba(255,255,255,.92)" : th.halo;
       list.slice().sort((a, b) => a.first - b.first).forEach(e => {
         const label = e.name.split(/[,，]/)[0].trim(), tw = ctx.measureText(label).width;
         let x = e.x + e.r + 4, left = false;
@@ -2921,7 +2918,7 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
         const rect = [x - 1, e.y - fs / 2 - 1, x + tw + 1, e.y + fs / 2 + 1];
         if (rect[0] < 4 || rect[2] > W - 4 || rect[1] < 64) return;
         if (placed.some(q => rect[0] < q[2] && rect[2] > q[0] && rect[1] < q[3] && rect[3] > q[1])) return;
-        placed.push(rect); ctx.textAlign = "left"; ctx.strokeText(label, x, e.y); ctx.fillStyle = th.text; ctx.fillText(label, x, e.y);
+        placed.push(rect); ctx.textAlign = "left"; ctx.strokeText(label, x, e.y); ctx.fillStyle = gl ? "#1b2a47" : th.text; ctx.fillText(label, x, e.y);
       });
     }
     if (plane && !lite && CINE.ph === "route") {
@@ -2932,7 +2929,7 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
           if (q0 && q1 && Math.hypot(q1[0] - q0[0], q1[1] - q0[1]) > .5 && Math.hypot(q1[0] - q0[0], q1[1] - q0[1]) < W / 3) planeAng = Math.atan2(q1[1] - q0[1], q1[0] - q0[0]); }
         const PS = Math.max(5, +$("planeSize").value || 14);
         const md = b.mode || "plane", flip = Math.cos(planeAng) < 0, cl = v => Math.max(0, Math.min(1, v));
-        const icon = (m, k, al) => { if (k <= .02 || al <= .02) return; ctx.save(); ctx.globalAlpha = al; if (m === "plane") drawPlane(ctx, q[0], q[1], planeAng, PS * k, th); else drawVehicle(ctx, q[0], q[1], m, flip, PS * k, th); ctx.restore(); };
+        const icon = (m, k, al) => { if (k <= .02 || al <= .02) return; ctx.save(); ctx.globalAlpha = al; if (m === "plane") drawPlane(ctx, q[0], q[1], planeAng, PS * k, vth); else drawVehicle(ctx, q[0], q[1], m, flip, PS * k, vth); ctx.restore(); };
         if (ph >= 0 && ph < 1 && (a.mode || "plane") !== md && a.key !== b.key) {
           const pm = a.mode || "plane", names = { plane: "飞机", train: "火车", car: "汽车" }, ob = x => 1 + 2.70158 * Math.pow(x - 1, 3) + 1.70158 * Math.pow(x - 1, 2);
           [0, .35].forEach(d => { const r = cl((ph - d) / (1 - d)); if (r <= 0 || r >= 1) return; ctx.beginPath(); ctx.arc(q[0], q[1], PS * (1 + r * 4.2), 0, 6.2832); ctx.lineWidth = 3 * (1 - r) + .8; ctx.strokeStyle = $("ringColor").value; ctx.globalAlpha = 1 - r; ctx.stroke(); ctx.globalAlpha = 1; });
@@ -3015,7 +3012,7 @@ $("dlPng").onclick = async () => { try { saveBlob(await dlSize(), "world-map.png
 $("copyImg").onclick = async () => { try { await navigator.clipboard.write([new ClipboardItem({ "image/png": await dlSize() })]); showToast("图片已复制，可直接粘贴到 Word、PPT 或邮件。"); } catch (e) { showToast("当前环境不允许写入剪贴板，请使用下载按钮。", true); } };
 
 /* ---------- config ---------- */
-const CFG_IDS = ["proj", "lon0", "lat0", "theme", "grat", "borders", "provNames", "cnMin", "usMin", "euMin", "viewHold", "vRes", "vFps", "noant", "title", "ptColor", "ringColor", "sizeMode", "rmin", "rmax", "labels", "lblSize", "lines", "plane", "planeSize", "planeText", "swHold", "dur", "fps", "gifW", "hold", "loop", "sun", "sunStart", "sunSpan", "glow", "real", "stars", "dof", "zoomK", "card", "odo", "cine", "cineIn", "cineOut"];
+const CFG_IDS = ["proj", "lon0", "lat0", "theme", "grat", "borders", "provNames", "cnMin", "usMin", "euMin", "viewHold", "vRes", "vFps", "noant", "title", "ptColor", "ringColor", "sizeMode", "rmin", "rmax", "labels", "lblSize", "lines", "plane", "planeSize", "planeText", "swHold", "dur", "fps", "gifW", "hold", "loop", "sun", "sunStart", "sunSpan", "glow", "gstyle", "stars", "dof", "zoomK", "card", "odo", "cine", "cineIn", "cineOut"];
 const getCfg = () => { const s = {}; CFG_IDS.forEach(id => { const el = $(id); s[id] = el.type === "checkbox" ? el.checked : el.value; }); return { app: "world-dots-tool", version: 1, settings: s }; };
 function applyCfg(obj) {
   const s = obj && (obj.settings || obj); if (!s || typeof s !== "object") throw new Error("不是有效的配置");
@@ -3202,9 +3199,4 @@ $("vidSave").onclick = async () => {
 };
 
 $("sample").click();
-</script>
-<script>
-if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
-}
 </script>
