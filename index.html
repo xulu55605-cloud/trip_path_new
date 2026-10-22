@@ -2745,7 +2745,7 @@ function drawCard(ctx, p, leg, u, ph, vis) {
   const cx = Math.max(6, Math.min(W - w - 6, q[0] - w / 2)), cy = Math.max(62, Math.min(H - h - 42, below ? q[1] + 36 + off : q[1] - h - 36 - off));
   ctx.globalAlpha = al; ctx.strokeStyle = $("ringColor").value; ctx.lineWidth = 1.4;
   ctx.beginPath(); ctx.moveTo(q[0], q[1] + (below ? 18 : -18)); ctx.lineTo(Math.max(cx + 10, Math.min(cx + w - 10, q[0])), below ? cy : cy + h); ctx.stroke();
-  ctx.beginPath(); ctx.roundRect(cx, cy, w, h, 7); ctx.fillStyle = th.bg; ctx.globalAlpha = .92 * al; ctx.fill(); ctx.globalAlpha = al; ctx.stroke();
+  ctx.beginPath(); ctx.roundRect(cx, cy, w, h, 7); ctx.fillStyle = th.bg; ctx.globalAlpha = al; ctx.fill(); ctx.globalAlpha = al; ctx.stroke();
   ctx.textAlign = "left"; ctx.textBaseline = "middle"; let yy = cy + 7;
   lines.forEach(l => { ctx.font = l.f; ctx.fillStyle = l.c; ctx.fillText(l.t, cx + 12, yy + l.h / 2); yy += l.h; });
   ctx.restore();
@@ -3101,7 +3101,7 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
           let bx = q[0] + cx * gap + (cx - 1) * w / 2 + w / 2 - w / 2, by = q[1] + cy * gap + (cy - 1) * h / 2;
           bx = q[0] + cx * gap - w / 2 + cx * w / 2; by = q[1] + cy * gap - h / 2 + cy * h / 2;
           bx = Math.max(4, Math.min(W - w - 4, bx)); by = Math.max(62, Math.min(H - h - 4, by));
-          ctx.beginPath(); ctx.roundRect(bx, by, w, h, 5); ctx.fillStyle = th.bg; ctx.globalAlpha = .88; ctx.fill(); ctx.globalAlpha = 1;
+          ctx.beginPath(); ctx.roundRect(bx, by, w, h, 5); ctx.fillStyle = th.bg; ctx.globalAlpha = 1; ctx.fill();   // 不透明：避免底图省名 / 地名从标签下透出，看起来像残影
           ctx.lineWidth = 1.4; ctx.strokeStyle = ptC; ctx.stroke();
           ctx.fillStyle = th.text; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(txt, bx + w / 2, by + h / 2 + 1);
         }
