@@ -158,6 +158,17 @@ main { min-width: 0; display: grid; gap: 10px; position: sticky; top: max(16px, 
   </section>
 
   <section>
+    <h2>更多特效</h2>
+    <label class="check"><input type="checkbox" id="lift" checked> 航线弧线抬升（飞机沿弧线升空，地面留下影子；地球仪）</label>
+    <label class="check"><input type="checkbox" id="flow" checked> 航线流光（已飞过的航线上有光点流动）</label>
+    <label class="check"><input type="checkbox" id="lights" checked> 夜侧城市灯光（需开启昼夜晨昏线）</label>
+    <label class="check"><input type="checkbox" id="drift" checked> 云层缓慢飘移（卫星真实风格）</label>
+    <label class="check"><input type="checkbox" id="breath" checked> 镜头呼吸（镜头极轻微地漂移）</label>
+    <label>区域地图 ↔ 地球仪的转场<select id="trans"><option value="morph" selected>展开 / 卷起（投影变形，仅自动切换 + 地球仪）</option><option value="fade">淡入缩放</option></select></label>
+    <label class="check"><input type="checkbox" id="tline" checked> 底部时间轴（可点击、拖动跳转）</label>
+  </section>
+
+  <section>
     <h2>点与标注</h2>
     <div class="row">
       <label>点颜色<input type="color" id="ptColor" value="#ffb703"></label>
@@ -219,6 +230,17 @@ main { min-width: 0; display: grid; gap: 10px; position: sticky; top: max(16px, 
       <video id="vidEl" class="gifout" controls playsinline loop></video>
       <div class="note">若点击保存后没有下载，请在视频上右键“视频另存为”（手机上长按视频保存）。</div>
     </div>
+  </section>
+
+  <section>
+    <h2>导出封面静帧</h2>
+    <div class="note">导出一张高清 PNG，当作海报或视频封面。透明背景只对地球仪有效（区域地图本身是满幅的），并会隐藏标题、里程计、时间轴等文字信息。</div>
+    <div class="row">
+      <label>画面<select id="coverFrame"><option value="cur">当前进度</option><option value="final" selected>最终全景</option><option value="start">起点</option></select></label>
+      <label>宽度<select id="coverW"><option value="2400" selected>2400 像素</option><option value="3600">3600 像素</option><option value="1200">1200 像素</option></select></label>
+    </div>
+    <label class="check"><input type="checkbox" id="coverTr"> 透明背景（隐藏文字信息）</label>
+    <button id="coverSave" class="primary">导出封面 PNG</button>
   </section>
 
   <section>
@@ -2426,7 +2448,7 @@ const theme = () => THEMES[$("theme").value] || THEMES.dark;
 let CURVIEW = null;
 const isGlobeAuto = () => $("proj").value === "autoglobe";
 const isAuto = () => { const v = $("proj").value; return v === "auto" || v === "autoglobe"; };
-const projKey = () => { const v = $("proj").value; return (v === "auto" || v === "autoglobe") ? (REG[CURVIEW] ? CURVIEW : (v === "autoglobe" ? "ortho" : "ne")) : v; };
+const projKey = () => { if (MORPH) return "morph"; const v = $("proj").value; return (v === "auto" || v === "autoglobe") ? (REG[CURVIEW] ? CURVIEW : (v === "autoglobe" ? "ortho" : "ne")) : v; };
 // 地球仪随动：相机中心 GCAM = [经度, 纬度]，仅在“自动切换 + 地球仪”模式下由 drawScene 每帧设置
 let GCAM = null;
 const camLL = () => GCAM ? [GCAM[0], Math.max(-80, Math.min(80, GCAM[1]))] : [+$("lon0").value || 0, +$("lat0").value || 0];
@@ -2558,13 +2580,14 @@ function earthMap(goog) {
   }
   return EMAPS[ek] = { w, h, col, cl };
 }
-function earthLayers(SM, goog) {
+function earthLayers(SM, goog, drift) {
   const E = earthMap(goog), lc = sampleCanvas(1, SM), cc = document.createElement("canvas"); cc.width = SM.w; cc.height = SM.h;
   const lx = lc.getContext("2d"), cx = cc.getContext("2d"), li = lx.createImageData(SM.w, SM.h), ci = cx.createImageData(SM.w, SM.h), a = li.data, b = ci.data;
   for (let j = SM.y0; j <= SM.y1; j++) for (let i = SM.x0; i <= SM.x1; i++) {
     const o = j * SM.w + i; if (!SM.ok[o]) continue;
     let ei = Math.floor((SM.lon[o] + 180) * 2), ej = Math.floor((90 - SM.lat[o]) * 2); ei = ((ei % E.w) + E.w) % E.w; ej = ej < 0 ? 0 : ej >= E.h ? E.h - 1 : ej;
-    const m = ej * E.w + ei, q = o * 4; a[q] = E.col[m * 3]; a[q + 1] = E.col[m * 3 + 1]; a[q + 2] = E.col[m * 3 + 2]; a[q + 3] = 255; b[q] = b[q + 1] = b[q + 2] = 255; b[q + 3] = E.cl[m];
+    const m = ej * E.w + ei, q = o * 4; a[q] = E.col[m * 3]; a[q + 1] = E.col[m * 3 + 1]; a[q + 2] = E.col[m * 3 + 2]; a[q + 3] = 255;
+    let ec = Math.floor((SM.lon[o] + 180 - (drift || 0)) * 2); ec = ((ec % E.w) + E.w) % E.w; b[q] = b[q + 1] = b[q + 2] = 255; b[q + 3] = E.cl[ej * E.w + ec];
   }
   lx.putImageData(li, 0, 0); cx.putImageData(ci, 0, 0); return { land: lc, cloud: goog ? null : cc };
 }
@@ -2588,6 +2611,104 @@ const skyOn = () => projKey() === "ortho" && $("stars").checked && $("theme").va
 let HUDE = null;   // 地图切换过渡中：区域地图所占的混合比例 E（>=0.5 时标题用浅色配色会看不清，故改回主题色）
 const hudC = () => (HUDE != null ? (isGlobeAuto() && $("stars").checked && $("theme").value === "light" && HUDE < .5) : skyOn()) ? THEMES.dark : theme();
 const googleOn = () => projKey() === "ortho" && $("gstyle").value === "google";
+let MORPH = null, TRANSP = false, NOHUD = false, CLDRIFT = 0;
+const TL = { x0: 90, x1: W - 90 }, DEG = 180 / Math.PI;
+const lerpColor = (a, b, t) => { const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16)), pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16)); return "rgb(" + pa.map((v, i) => Math.round(v + (pb[i] - v) * t)).join(",") + ")"; };
+// ---- 夜侧城市灯光：世界主要城市 + 周边随机卫星点，按太阳高度角点亮 ----
+const CITY_STR = "139.7,35.7,3;135.5,34.7,2;127,37.5,3;116.4,39.9,3;121.5,31.2,3;113.3,23.1,3;114.1,22.5,2;114.2,22.3,2;104.1,30.7,2;106.5,29.6,2;114.3,30.6,2;108.9,34.3,2;117.2,39.1,2;118.8,32.1,2;120.2,30.3,2;123.4,41.8,1;126.6,45.8,1;121.5,25,2;121,14.6,2;105.8,21,2;106.7,10.8,2;100.5,13.8,3;103.8,1.35,2;101.7,3.1,2;106.8,-6.2,3;112.7,-7.3,1;77.2,28.6,3;72.9,19.1,3;88.4,22.6,2;77.6,13,2;80.3,13.1,2;78.5,17.4,2;67,24.9,2;74.3,31.5,2;90.4,23.8,3;85.3,27.7,1;79.9,6.9,1;51.4,35.7,2;44.4,33.3,2;46.7,24.7,2;39.2,21.5,1;55.3,25.2,2;29,41,3;32.9,39.9,1;34.8,32.1,1;31.2,30,3;29.9,31.2,1;3.4,6.5,3;7.5,9.1,1;-0.2,5.6,1;-17.4,14.7,1;15.3,-4.3,2;13.2,-8.8,1;36.8,-1.3,2;38.7,9,1;32.5,15.6,1;28,-26.2,2;18.4,-33.9,1;31,-29.9,1;-7.6,33.6,1;3.1,36.8,1;10.2,36.8,1;37.6,55.8,3;30.3,59.9,2;30.5,50.5,2;21,52.2,2;13.4,52.5,2;10,53.6,1;11.6,48.1,1;8.7,50.1,1;2.35,48.9,3;4.8,45.8,1;5.4,43.3,1;-0.1,51.5,3;-2.2,53.5,1;-6.3,53.3,1;-3.7,40.4,2;2.2,41.4,2;-9.1,38.7,1;12.5,41.9,2;9.2,45.5,2;23.7,38,1;16.4,48.2,1;19,47.5,1;14.4,50.1,1;26.1,44.4,1;4.9,52.4,2;4.35,50.85,1;18.1,59.3,1;10.75,59.9,1;12.6,55.7,1;25,60.2,1;82.9,55,1;60.6,56.8,1;69.2,41.3,1;76.9,43.2,1;106.9,47.9,1;131.9,43.1,1;151.2,-33.9,2;145,-37.8,2;153,-27.5,1;115.9,-32,1;174.8,-36.8,1;-74,40.7,3;-71.1,42.4,2;-77,38.9,2;-75.2,40,1;-87.6,41.9,3;-83,42.3,1;-79.4,43.7,2;-73.6,45.5,1;-80.2,25.8,2;-84.4,33.7,2;-96.8,32.8,2;-95.4,29.8,2;-105,39.7,1;-112,33.4,1;-118.2,34.1,3;-122.4,37.8,2;-122.3,47.6,1;-123.1,49.3,1;-115.1,36.2,1;-99.1,19.4,3;-103.3,20.7,1;-100.3,25.7,1;-82.4,23.1,1;-74.1,4.7,2;-77,-12,2;-78.5,-.2,1;-66.9,10.5,1;-70.7,-33.4,2;-58.4,-34.6,3;-46.6,-23.5,3;-43.2,-22.9,2;-47.9,-15.8,1;-43.9,-19.9,1;-38.5,-13,1;-34.9,-8,1;-56.2,-34.9,1";
+let LIGHTS = null;
+function lightsList() {
+  if (LIGHTS) return LIGHTS;
+  let a = 7919; const rnd = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  LIGHTS = [];
+  CITY_STR.split(";").forEach(r => { const [lo, la, w] = r.split(",").map(Number), k = 4 + w * 5;
+    LIGHTS.push([lo, la, .55 + w * .18]);
+    for (let i = 0; i < k; i++) { const ang = rnd() * 6.283, rr = (.4 + rnd() * rnd() * (1.2 + w * .9)); LIGHTS.push([lo + Math.cos(ang) * rr / Math.max(.3, Math.cos(la * Math.PI / 180)), la + Math.sin(ang) * rr, .18 + rnd() * .3]); } });
+  LIGHTS.forEach(L => { const la = L[1] * Math.PI / 180, lo = L[0] * Math.PI / 180; L.push(Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)); });
+  return LIGHTS;
+}
+function drawLights(x, p, alpha) {
+  const sun = sunAt(SIMT), sl = sun[0] * Math.PI / 180, sd = sun[1] * Math.PI / 180, sx = Math.cos(sd) * Math.cos(sl), sy = Math.cos(sd) * Math.sin(sl), sz = Math.sin(sd);
+  const [clo, cla] = camLL(), cl = clo * Math.PI / 180, ca = cla * Math.PI / 180, cx = Math.cos(ca) * Math.cos(cl), cy = Math.cos(ca) * Math.sin(cl), cz = Math.sin(ca), k = Math.max(.6, p.scale() / 284);
+  x.save(); x.globalCompositeOperation = "lighter";
+  lightsList().forEach(L => {
+    const cs = L[3] * sx + L[4] * sy + L[5] * sz; let t = (cs + .12) / .3; t = t < 0 ? 0 : t > 1 ? 1 : t; const night = 1 - t * t * (3 - 2 * t); if (night < .02) return;
+    const cv_ = L[3] * cx + L[4] * cy + L[5] * cz; if (cv_ < .05) return; const q = p([L[0], L[1]]); if (!q) return;
+    const a = night * Math.min(1, cv_ / .3) * L[2] * alpha, r = (.7 + L[2] * 1.3) * k;
+    x.fillStyle = `rgba(255,170,80,${(a * .18).toFixed(3)})`; x.beginPath(); x.arc(q[0], q[1], r * 2.6, 0, 6.2832); x.fill();
+    x.fillStyle = `rgba(255,225,160,${Math.min(1, a * .95).toFixed(3)})`; x.beginPath(); x.arc(q[0], q[1], r * .75, 0, 6.2832); x.fill();
+  });
+  x.restore();
+}
+// ---- 区域地图 ↔ 地球仪：投影变形（展开 / 卷起）----
+function morphProj() {
+  const M = MORPH, sv = CURVIEW; MORPH = null; CURVIEW = M.R; const pf = makeProj0(); CURVIEW = "world"; const pg = makeProj0(); MORPH = M; CURVIEW = sv;
+  const [lo, la] = camLL(), rot = d3.geoRotation([-lo, -la]), t = M.t;
+  const raw = (lam, phi) => { const g = rot.invert([lam * DEG, phi * DEG]), A = pg(g); if (!A) return [NaN, NaN]; const B = pf(g) || A;
+    return [A[0] * (1 - t) + B[0] * t, -(A[1] * (1 - t) + B[1] * t)]; };
+  const pr = d3.geoProjection(raw).rotate([-lo, -la]).clipAngle(90).scale(1).precision(.8); const c0 = raw(0, 0); pr.translate([c0[0], -c0[1]]);   // d3 会把 raw(0,0) 对齐到 translate，这里抵消该偏移
+  pr.__pg = pg; return pr;
+}
+function morphBase(s) {
+  const th = theme(), t = MORPH.t, c = document.createElement("canvas"); c.width = Math.round(W * s); c.height = Math.round(H * s);
+  const x = c.getContext("2d"); x.scale(s, s);
+  const p = makeProj(), pg = p.__pg, path = d3.geoPath(p, x), gpath = d3.geoPath(pg, x), rg = REG[MORPH.R], gs = $("gstyle").value, goog = gs === "google", real = gs === "real";
+  if (!TRANSP) {
+    x.fillStyle = th.bg; x.fillRect(0, 0, W, H);
+    if ($("stars").checked) { if ($("theme").value === "light") { const g = x.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#04080f"); g.addColorStop(1, "#0b1528"); x.fillStyle = g; x.fillRect(0, 0, W, H); } drawStars(x); }
+  }
+  const [tx, ty] = pg.translate(), R = pg.scale();
+  if ($("glow").checked && t < 1) { const g = x.createRadialGradient(tx, ty, R * .97, tx, ty, R * 1.13); const A = 1 - t;
+    if (goog) { g.addColorStop(0, `rgba(190,225,255,${.8 * A})`); g.addColorStop(.3, `rgba(150,200,255,${.3 * A})`); g.addColorStop(1, "rgba(120,180,255,0)"); }
+    else { g.addColorStop(0, `rgba(110,185,255,${.55 * A})`); g.addColorStop(.3, `rgba(70,140,240,${.24 * A})`); g.addColorStop(1, "rgba(40,100,220,0)"); }
+    x.fillStyle = g; x.beginPath(); x.arc(tx, ty, R * 1.13, 0, 6.2832); x.fill(); }
+  const oceanG = goog ? "#a6cff4" : real ? "#0b2c63" : th.ocean, landG = goog ? "#eeeae0" : real ? "#566e3e" : th.land;
+  x.beginPath(); path({ type: "Sphere" }); x.fillStyle = lerpColor(oceanG, th.ocean, t); x.fill();
+  if (t > 0) { x.globalAlpha = t; x.fillStyle = th.ocean; x.fillRect(0, 0, W, H); x.globalAlpha = 1; }
+  if ($("grat").checked) { x.beginPath(); path(d3.geoGraticule10()); x.strokeStyle = th.grid; x.lineWidth = .8; x.stroke(); }
+  x.beginPath(); LAND.forEach(f => { if ($("noant").checked && f.properties && f.properties.name === "Antarctica") return; path(f); });
+  x.globalAlpha = 1 - .25 * t; x.fillStyle = lerpColor(landG, th.land, t); x.fill(); x.globalAlpha = 1;
+  if ($("borders").checked) { x.beginPath(); path(BORDER); x.strokeStyle = th.border; x.globalAlpha = .6; x.lineWidth = .7; x.stroke(); x.globalAlpha = 1; }
+  if (t > 0) { x.save(); x.globalAlpha = t; x.beginPath(); rg.F.forEach(f => path(f)); x.fillStyle = th.land; x.fill();
+    if ($("borders").checked) { x.beginPath(); path(rg.IN); x.strokeStyle = th.border; x.lineWidth = .8; x.stroke(); }
+    x.beginPath(); path(rg.OUT); x.strokeStyle = th.sub; x.lineWidth = 1.4; x.lineJoin = "round"; x.stroke(); x.restore(); }
+  const fa = clamp01(1 - 3 * t), night = isGlobeAuto() && $("sun").checked && SIMT != null && fa > 0, SM = (real || goog || night) && fa > 0 ? globeSamples(pg) : null;
+  if (SM && (real || goog)) { const L = earthLayers(SM, goog, $("drift").checked ? CLDRIFT : 0), a = fa;
+    x.save(); x.globalAlpha = a; x.beginPath(); LAND.forEach(f => { if ($("noant").checked && f.properties && f.properties.name === "Antarctica") return; gpath(f); }); x.clip();
+    x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(L.land, 0, 0, SM.w * SM.K, SM.h * SM.K); x.restore();
+    if (L.cloud) { x.save(); x.globalAlpha = a; blitSmooth(x, gpath, L.cloud, SM); x.restore(); } }
+  if (night) { x.save(); x.globalAlpha = fa; nightShade(x, pg, gpath, th, SM); x.restore(); if ($("lights").checked) drawLights(x, pg, fa); }
+  return c;
+}
+// ---- 底部时间轴 ----
+function stationTimes() {
+  const N = STEPS.length, hp = Math.max(0, +$("swHold").value || 0), vh = Math.max(0, +$("viewHold").value || 0), auto = isAuto(), V = auto ? viewsOfLegs() : null, fl = legFlight(), pa = []; let tot = 0;
+  for (let i = 0; i < N - 1; i++) {
+    const sw = i > 0 && (STEPS[i].mode || "plane") !== (STEPS[i + 1].mode || "plane") && STEPS[i].key !== STEPS[i + 1].key ? hp : 0, vs = auto && i > 0 && V[i] !== V[i - 1] ? vh : 0;
+    pa.push(Math.max(sw, vs)); tot += fl[i] + pa[i];
+  }
+  const [a, b] = cineSpan(), out = [a]; let acc = 0;
+  for (let i = 0; i < N - 1; i++) { acc += fl[i] + pa[i]; out.push(a + acc / tot * (1 - a - b)); }
+  return out;
+}
+function drawTimeline(ctx, frac, n) {
+  const N = STEPS.length; if (!$("tline").checked || N < 2 || NOHUD) return;
+  const th = hudC(), ptC = $("ptColor").value, x0 = TL.x0, x1 = TL.x1, y = H - 16, planeOn = $("plane").checked && frac != null;
+  const g = planeOn ? stationTimes() : STEPS.map((_, i) => i / (N - 1)), cur = frac != null ? clamp01(frac) : (n - 1) / (N - 1), X = v => x0 + (x1 - x0) * v;
+  let ci = 0; g.forEach((v, i) => { if (v <= cur + 1e-6) ci = i; });
+  ctx.save(); ctx.textBaseline = "middle";
+  ctx.beginPath(); ctx.roundRect(x0, y - 2, x1 - x0, 4, 2); ctx.fillStyle = th.sub; ctx.globalAlpha = .35; ctx.fill();
+  ctx.beginPath(); ctx.roundRect(x0, y - 2, Math.max(4, X(cur) - x0), 4, 2); ctx.fillStyle = ptC; ctx.globalAlpha = .95; ctx.fill(); ctx.globalAlpha = 1;
+  g.forEach((v, i) => { ctx.beginPath(); ctx.arc(X(v), y, 3.4, 0, 6.2832); ctx.fillStyle = v <= cur + 1e-6 ? ptC : th.sub; ctx.globalAlpha = v <= cur + 1e-6 ? 1 : .6; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = THEMES.dark.bg; ctx.globalAlpha = 1; ctx.stroke(); });
+  const px = X(cur); ctx.beginPath(); ctx.arc(px, y, 6.5, 0, 6.2832); ctx.fillStyle = th.text; ctx.fill(); ctx.lineWidth = 2.2; ctx.strokeStyle = ptC; ctx.stroke();
+  const nm = i => STEPS[i].name.split(/[,，]/)[0].trim();
+  ctx.font = "600 12px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif"; ctx.textAlign = "center"; ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = THEMES.dark.bg;
+  const tw = ctx.measureText(nm(ci)).width, lx = Math.max(x0 + tw / 2, Math.min(x1 - tw / 2, px)); ctx.strokeText(nm(ci), lx, y - 16); ctx.fillStyle = th.text; ctx.fillText(nm(ci), lx, y - 16);
+  ctx.font = "11px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif"; ctx.fillStyle = th.sub;
+  if (Math.abs(px - x0) > tw / 2 + 60) { ctx.textAlign = "left"; ctx.fillText(nm(0), x0 - 4, y - 16); }
+  if (Math.abs(px - x1) > tw / 2 + 60) { ctx.textAlign = "right"; ctx.fillText(nm(N - 1), x1 + 4, y - 16); }
+  ctx.restore();
+}
 function fmtDur(km, mode) {
   const h = km / ({ plane: 800, train: 200, car: 70 }[mode] || 800) + (mode === "plane" || !mode ? .7 : 0);
   if (h < 1) return Math.max(1, Math.round(h * 60)) + " 分钟";
@@ -2621,7 +2742,7 @@ function drawCard(ctx, p, leg, u, ph, vis) {
     if (km > 1) lines.push({ t: `距上一站 ${Math.round(km).toLocaleString("en-US")} km · 约 ${fmtDur(km, st.mode || "plane")}`, f: "12px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif", h: 17, c: th.sub }); }
   ctx.save(); let w = 0; lines.forEach(l => { ctx.font = l.f; w = Math.max(w, ctx.measureText(l.t).width); });
   w += 24; const h = lines.reduce((a, l) => a + l.h, 0) + 14, below = Math.sin(planeAng) < 0, off = (1 - al) * 8;
-  const cx = Math.max(6, Math.min(W - w - 6, q[0] - w / 2)), cy = Math.max(62, Math.min(H - h - 6, below ? q[1] + 36 + off : q[1] - h - 36 - off));
+  const cx = Math.max(6, Math.min(W - w - 6, q[0] - w / 2)), cy = Math.max(62, Math.min(H - h - 42, below ? q[1] + 36 + off : q[1] - h - 36 - off));
   ctx.globalAlpha = al; ctx.strokeStyle = $("ringColor").value; ctx.lineWidth = 1.4;
   ctx.beginPath(); ctx.moveTo(q[0], q[1] + (below ? 18 : -18)); ctx.lineTo(Math.max(cx + 10, Math.min(cx + w - 10, q[0])), below ? cy : cy + h); ctx.stroke();
   ctx.beginPath(); ctx.roundRect(cx, cy, w, h, 7); ctx.fillStyle = th.bg; ctx.globalAlpha = .92 * al; ctx.fill(); ctx.globalAlpha = al; ctx.stroke();
@@ -2686,6 +2807,7 @@ function makeProj() {
   return p;
 }
 function makeProj0() {
+  if (MORPH) return morphProj();
   if (projKey() === "eu") {
     const p = d3.geoConicEqualArea().parallels([40, 62]).rotate([-14, 0]);
     p.fitExtent([[16, 64], [W - 16, H - 16]], d3.geoGraticule().extent([[-24, 34], [48, 72]]).outline()); return p;
@@ -2706,12 +2828,13 @@ function makeProj0() {
 }
 const BC = new Map();
 function getBase(s) {
-  const noC = PTF || (isGlobeAuto() && projKey() === "ortho"), key = [PTF ? "T" : "", projKey(), $("lon0").value, $("lat0").value, $("theme").value, $("grat").checked, $("borders").checked, $("noant").checked, $("provNames").checked, $("glow").checked, $("gstyle").value, $("stars").checked, s].join("|");
+  if (MORPH) return morphBase(s);
+  const noC = PTF || TRANSP || (isGlobeAuto() && projKey() === "ortho"), key = [PTF ? "T" : "", projKey(), $("lon0").value, $("lat0").value, $("theme").value, $("grat").checked, $("borders").checked, $("noant").checked, $("provNames").checked, $("glow").checked, $("gstyle").value, $("stars").checked, s].join("|");
   if (!noC && BC.has(key)) return BC.get(key);
   const th = theme(), c = document.createElement("canvas"); c.width = Math.round(W * s); c.height = Math.round(H * s);
   const x = c.getContext("2d"); x.scale(s, s);
   const p = makeProj(), path = d3.geoPath(p, x);
-  x.fillStyle = th.bg; x.fillRect(0, 0, W, H);
+  if (!TRANSP || REG[projKey()]) { x.fillStyle = th.bg; x.fillRect(0, 0, W, H); }
   const rg = REG[projKey()];
   if (rg) {
     x.fillStyle = th.ocean; x.fillRect(0, 0, W, H);
@@ -2729,7 +2852,7 @@ function getBase(s) {
     if (!noC) { BC.set(key, c); if (BC.size > 6) BC.delete(BC.keys().next().value); } return c;
   }
   const isO = projKey() === "ortho";
-  if (isO && $("stars").checked) {
+  if (isO && $("stars").checked && !TRANSP) {
     if ($("theme").value === "light") { const g = x.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#04080f"); g.addColorStop(1, "#0b1528"); x.fillStyle = g; x.fillRect(0, 0, W, H); }
     drawStars(x);
   }
@@ -2745,11 +2868,11 @@ function getBase(s) {
   x.fill();
   if ($("grat").checked) { x.beginPath(); path(d3.geoGraticule10()); x.strokeStyle = real ? "rgba(255,255,255,.07)" : goog ? "rgba(255,255,255,.3)" : th.grid; x.lineWidth = 0.8; x.stroke(); }
   x.beginPath(); LAND.forEach(f => { if ($("noant").checked && f.properties && f.properties.name === "Antarctica") return; path(f); });
-  if (real || goog) { const L = earthLayers(SM, goog); x.save(); x.clip(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(L.land, 0, 0, SM.w * SM.K, SM.h * SM.K); x.restore(); window.__cl = L.cloud; }
+  if (real || goog) { const L = earthLayers(SM, goog, $("drift").checked ? CLDRIFT : 0); x.save(); x.clip(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(L.land, 0, 0, SM.w * SM.K, SM.h * SM.K); x.restore(); window.__cl = L.cloud; }
   else { x.fillStyle = th.land; x.fill(); }
   if ($("borders").checked) { x.beginPath(); path(BORDER); x.strokeStyle = real ? "rgba(255,255,255,.22)" : goog ? "rgba(140,132,156,.8)" : th.border; x.lineWidth = real ? .5 : goog ? .7 : 0.6; x.stroke(); }
   if (real && window.__cl) { blitSmooth(x, path, window.__cl, SM); window.__cl = null; }
-  if (night) nightShade(x, p, path, th, SM);
+  if (night) { nightShade(x, p, path, th, SM); if ($("lights").checked) drawLights(x, p, 1); }
   if (goog) { // 受光明暗 + 边缘大气薄雾
     const [tx, ty] = p.translate(), R = p.scale(); let g = x.createRadialGradient(tx - R * .35, ty - R * .35, R * .1, tx, ty, R * 1.05);
     g.addColorStop(0, "rgba(255,255,255,.16)"); g.addColorStop(.55, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(25,50,100,.26)"); x.fillStyle = g; x.beginPath(); path({ type: "Sphere" }); x.fill();
@@ -2829,7 +2952,10 @@ function drawScene(ctx, s, n, recent, track, frac) {
   const glob = isGlobeAuto();
   CINE = glob ? cineAt(frac) : { ph: "route", t: 0 };
   GZOOM = 1; GCAM = null; TWK = glob && frac != null ? frac : 0; SIMT = glob && $("sun").checked ? simMs(frac, n) : null;
-  if (glob) { const cz = camTarget(frac, n); if (cz) { GCAM = cz.c; GZOOM = cz.z; } }
+  { const st0 = Date.parse(($("sunStart").value || "2026-10-19T08:00") + ":00Z"); CLDRIFT = SIMT != null ? (SIMT - st0) / 3.6e6 * .3 : TWK * 20; }
+  if (glob) { const cz = camTarget(frac, n);
+    if (cz) { GCAM = cz.c; GZOOM = cz.z;
+      if ($("breath").checked && TWK > 0) { const k = TWK * 6.2832, f = 1 / cz.z; GCAM = [cz.c[0] + 2.2 * f * Math.sin(k * 2.3), cz.c[1] + 1.3 * f * Math.sin(k * 1.7 + 1)]; GZOOM = cz.z * (1 + .012 * Math.sin(k * 3.1)); } } }
   if (!isAuto()) { CURVIEW = null; return drawLayer(ctx, s, n, recent, track, frac, true); }
   const N = STEPS.length, plane = $("plane").checked && N > 1 && frac != null; let view = "world", from = null, e = 0;
   if (N > 1) {
@@ -2842,6 +2968,10 @@ function drawScene(ctx, s, n, recent, track, frac) {
   }
   if (from && from !== "world" && view !== "world") from = null;
   if (!from) { CURVIEW = view; return drawLayer(ctx, s, n, recent, track, frac, true); }
+  if (glob && $("trans").value === "morph") {
+    const Rm = view !== "world" ? view : from, Em = view === Rm ? e : 1 - e; MORPH = { R: Rm, t: Em }; CURVIEW = "world"; HUDE = Em;
+    try { return drawLayer(ctx, s, n, recent, track, frac, true); } finally { MORPH = null; HUDE = null; CURVIEW = view; }
+  }
   const R = view !== "world" ? view : from;
   const cw = ctx.canvas.width, ch = ctx.canvas.height;
   if (!LAYERS || LAYERS[0].width !== cw || LAYERS[0].height !== ch) LAYERS = [0, 1].map(() => { const c = document.createElement("canvas"); c.width = cw; c.height = ch; return c; });
@@ -2852,22 +2982,26 @@ function drawScene(ctx, s, n, recent, track, frac) {
   const render = (cv, v, k, q, tr, lite) => { CURVIEW = v; PTF = { k, c, q }; try { return drawLayer(cv.getContext("2d"), s, n, recent, tr, frac, false, lite); } finally { PTF = null; } };
   const nn = render(la, "world", 1 + (Z - 1) * E, qw, view === "world", view === R);
   render(lb, R, 1 / Z + (1 - 1 / Z) * E, qc, view === R, view !== R); CURVIEW = view;
-  ctx.save(); ctx.fillStyle = th.bg; ctx.fillRect(0, 0, cw, ch); ctx.drawImage(la, 0, 0); ctx.globalAlpha = E; ctx.drawImage(lb, 0, 0); ctx.restore();
-  HUDE = E; ctx.save(); ctx.scale(s, s); drawHud(ctx, nn); drawOdo(ctx, frac, nn); ctx.restore(); HUDE = null;
+  ctx.save(); if (!TRANSP) { ctx.fillStyle = th.bg; ctx.fillRect(0, 0, cw, ch); } ctx.drawImage(la, 0, 0); ctx.globalAlpha = E; ctx.drawImage(lb, 0, 0); ctx.restore();
+  HUDE = E; if (!NOHUD) { ctx.save(); ctx.scale(s, s); drawHud(ctx, nn); drawOdo(ctx, frac, nn); drawTimeline(ctx, frac, nn); ctx.restore(); } HUDE = null;
   return nn;
 }
 function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
+  if (NOHUD) hud = false;
   const th = theme(), p = makeProj(), N = STEPS.length, ptC = $("ptColor").value, ringC = $("ringColor").value, gl = googleOn(), vth = gl ? { ...th, text: "#14233f", bg: "#ffffff" } : th;
   ctx.drawImage(getBase(s), 0, 0);
   const plane = $("plane").checked && N > 1 && frac != null; let leg = 0, u = 0, ph = -1;
   if (plane) { const tl = timelineAt(frac); leg = tl.leg; u = tl.u; ph = tl.ph; n = tl.n; recent = 1; }
   ctx.save(); ctx.scale(s, s);
-  const ortho = projKey() === "ortho", c0 = camLL();
-  if (REG[projKey()] && N) {
-    const key = projKey(), set = new Set(); for (let i = 0; i < n; i++) { if (STEPS[i].reg === key) set.add(STEPS[i].ri); }
-    if (set.size) { const gp = d3.geoPath(p, ctx); ctx.beginPath(); set.forEach(i => gp(REG[key].F[i])); ctx.fillStyle = ptC; ctx.globalAlpha = .2; ctx.fill(); ctx.globalAlpha = .75; ctx.lineWidth = 1.3; ctx.strokeStyle = ptC; ctx.stroke(); ctx.globalAlpha = 1; }
+  const ortho = projKey() === "ortho", clipd = ortho || projKey() === "morph", c0 = camLL(), liftOn = ortho && $("lift").checked && !lite;
+  const hmaxPx = (a, b) => (.08 + .22 * clamp01(d3.geoDistance(P_(a), P_(b)) / Math.PI)) * p.scale();
+  const liftAt = (a, b, uu) => !liftOn || (b.mode || "plane") !== "plane" || a.key === b.key ? 0 : Math.sin(Math.PI * uu) * hmaxPx(a, b);
+  const rkey = MORPH ? MORPH.R : projKey(), hm = MORPH ? MORPH.t : 1;
+  if (REG[rkey] && N && hm > .02) {
+    const key = rkey, set = new Set(); for (let i = 0; i < n; i++) { if (STEPS[i].reg === key) set.add(STEPS[i].ri); }
+    if (set.size) { const gp = d3.geoPath(p, ctx); ctx.beginPath(); set.forEach(i => gp(REG[key].F[i])); ctx.fillStyle = ptC; ctx.globalAlpha = .2 * hm; ctx.fill(); ctx.globalAlpha = .75 * hm; ctx.lineWidth = 1.3; ctx.strokeStyle = ptC; ctx.stroke(); ctx.globalAlpha = 1; }
   }
-  const vis = (lat, lon) => !ortho || d3.geoDistance([lon, lat], c0) < Math.PI / 2 - 0.02;
+  const vis = (lat, lon) => !clipd || d3.geoDistance([lon, lat], c0) < Math.PI / 2 - 0.02;
   // title + counter
   ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
   ctx.fillStyle = hudC().text; ctx.font = "600 21px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif"; if (hud) ctx.fillText($("title").value, 22, 34);
@@ -2887,16 +3021,32 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
       return Math.sqrt(r0 * r0 + Math.min(1, f) * (r1 * r1 - r0 * r0)); };
     if ($("lines").checked || plane) {
       const path = d3.geoPath(p, ctx), segs = { plane: [], train: [], car: [] }; let prev = null;
-      for (let i = 0; i < n; i++) { const st = STEPS[i]; if (prev && prev.key !== st.key) segs[st.mode || "plane"].push([[prev.lon, prev.lat], [st.lon, st.lat]]); prev = st; }
+      const arcs = [], done = [];
+      for (let i = 0; i < n; i++) { const st = STEPS[i]; if (prev && prev.key !== st.key) { segs[st.mode || "plane"].push([[prev.lon, prev.lat], [st.lon, st.lat]]); done.push([prev, st]); if (liftOn && (st.mode || "plane") === "plane") arcs.push([prev, st, 1]); } prev = st; }
       if (plane && u > 0 && u < 1 && STEPS[leg].key !== STEPS[leg + 1].key) {
         const ip = d3.geoInterpolate([STEPS[leg].lon, STEPS[leg].lat], [STEPS[leg + 1].lon, STEPS[leg + 1].lat]), cs = [];
         const K = Math.max(2, Math.ceil(60 * u)); for (let k = 0; k <= K; k++) cs.push(ip(u * k / K));
         segs[STEPS[leg + 1].mode || "plane"].push(cs);
+        if (liftOn && (STEPS[leg + 1].mode || "plane") === "plane") arcs.push([STEPS[leg], STEPS[leg + 1], u]);
       }
+      const arcPolys = arcs.flatMap(([a, b, u1]) => { const ip = d3.geoInterpolate(P_(a), P_(b)), K = Math.max(3, Math.ceil(64 * u1)), hmx = hmaxPx(a, b), out = []; let cur = [];
+        for (let k = 0; k <= K; k++) { const uu = u1 * k / K, g = ip(uu); if (!vis(g[1], g[0])) { if (cur.length > 1) out.push(cur); cur = []; continue; } const q = p(g); if (!q) continue; cur.push([q[0], q[1] - Math.sin(Math.PI * uu) * hmx]); }
+        if (cur.length > 1) out.push(cur); return out; });
+      const strokePolys = (w, col, al, blur) => { if (!arcPolys.length) return; ctx.save(); ctx.beginPath(); arcPolys.forEach(pl => { ctx.moveTo(pl[0][0], pl[0][1]); for (let i = 1; i < pl.length; i++) ctx.lineTo(pl[i][0], pl[i][1]); });
+        ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.lineWidth = w; ctx.strokeStyle = col; ctx.globalAlpha = al; if (blur) { ctx.shadowColor = col; ctx.shadowBlur = blur; } ctx.stroke(); ctx.restore(); };
       if (gl) { ctx.save(); ctx.strokeStyle = "rgba(20,40,90,.5)"; ctx.lineWidth = 3.4; ctx.lineCap = "round"; ctx.beginPath(); [...segs.plane, ...segs.train, ...segs.car].forEach(c => path({ type: "LineString", coordinates: c })); ctx.stroke(); ctx.restore(); }
       strokeSegs(ctx, path, segs, ptC, th);
+      if (gl) strokePolys(3.6, "rgba(20,40,90,.5)", 1, 0);
+      strokePolys(1.9, ptC, .9, 6);
+      if ($("flow").checked && frac != null && CINE.ph !== "intro") {   // 航线流光
+        const cyc = 7, lightC = "#fff3d6"; ctx.save(); ctx.fillStyle = lightC;
+        const legAll = CINE.ph === "outro" ? done : done;
+        legAll.forEach(([a, b], li) => { const md = b.mode || "plane", ip = d3.geoInterpolate(P_(a), P_(b)), hmx = md === "plane" && liftOn ? hmaxPx(a, b) : 0;
+          for (let j = 0; j < 3; j++) { const uu = (TWK * cyc * (md === "plane" ? 1 : .6) + li * .37 + j / 3) % 1, g = ip(uu); if (!vis(g[1], g[0])) continue; const q = p(g); if (!q) continue;
+            const al = Math.sin(Math.PI * uu), yy = q[1] - Math.sin(Math.PI * uu) * hmx; ctx.shadowColor = ptC; ctx.shadowBlur = 9; ctx.globalAlpha = .9 * al; ctx.beginPath(); ctx.arc(q[0], yy, 2.1, 0, 6.2832); ctx.fill(); } });
+        ctx.restore(); }
       if (CINE.ph === "outro") { const k = clamp01(CINE.t * 4); ctx.save(); ctx.shadowColor = ptC; ctx.shadowBlur = 12 * k; ctx.strokeStyle = ptC; ctx.lineWidth = 1.8 + 1.4 * k; ctx.globalAlpha = .75 * k; ctx.lineCap = "round";
-        ctx.beginPath(); [...segs.plane, ...segs.train, ...segs.car].forEach(c => path({ type: "LineString", coordinates: c })); ctx.stroke(); ctx.restore(); }
+        ctx.beginPath(); [...segs.plane, ...segs.train, ...segs.car].forEach(c => path({ type: "LineString", coordinates: c })); ctx.stroke(); ctx.restore(); strokePolys(2.6, ptC, .8 * k, 14); }
     }
     const list = [...acc.values()].map(e => { const q = vis(e.lat, e.lon) ? p([e.lon, e.lat]) : null; return q ? { ...e, x: q[0], y: q[1], r: rad(e.w) } : null; }).filter(Boolean);
     list.slice().sort((a, b) => b.r - a.r).forEach(e => {
@@ -2925,7 +3075,10 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
       const a = STEPS[leg], b = STEPS[leg + 1], same = a.key === b.key, ip = d3.geoInterpolate([a.lon, a.lat], [b.lon, b.lat]);
       const pos = same ? [b.lon, b.lat] : ip(u), q = (vis(pos[1], pos[0]) ? p(pos) : null);
       if (q) {
-        if (!same) { const q0 = p(ip(Math.max(0, u - .02))), q1 = p(ip(Math.min(1, u + .02)));
+        const lh = same ? 0 : liftAt(a, b, u);
+        if (lh > 1) { ctx.save(); ctx.globalAlpha = .28 * (1 - .4 * lh / hmaxPx(a, b)); ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(q[0], q[1] + 2, Math.max(4, +$("planeSize").value || 14) * (1 - .3 * lh / hmaxPx(a, b)), Math.max(2, (+$("planeSize").value || 14) * .3), 0, 0, 6.2832); ctx.fill(); ctx.restore(); }
+        q[1] -= lh;
+        if (!same) { const q0 = p(ip(Math.max(0, u - .02))), q1 = p(ip(Math.min(1, u + .02))); if (q0 && q1) { q0[1] -= liftAt(a, b, Math.max(0, u - .02)); q1[1] -= liftAt(a, b, Math.min(1, u + .02)); }
           if (q0 && q1 && Math.hypot(q1[0] - q0[0], q1[1] - q0[1]) > .5 && Math.hypot(q1[0] - q0[0], q1[1] - q0[1]) < W / 3) planeAng = Math.atan2(q1[1] - q0[1], q1[0] - q0[0]); }
         const PS = Math.max(5, +$("planeSize").value || 14);
         const md = b.mode || "plane", flip = Math.cos(planeAng) < 0, cl = v => Math.max(0, Math.min(1, v));
@@ -2954,12 +3107,12 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
         }
       }
     }
-    if (plane && !lite && $("card").checked) drawCard(ctx, p, leg, u, ph, vis);
-    if (plane && !lite) {
+    if (plane && !lite && $("card").checked && !NOHUD) drawCard(ctx, p, leg, u, ph, vis);
+    if (plane && !lite && !NOHUD) {
       const used = Object.keys(MODES).filter(k => STEPS.slice(1).some(x => (x.mode || "plane") === k));
       if (used.length > 1) {
         ctx.font = "12px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-        const names = { plane: "飞机", train: "火车", car: "汽车" }, iw = 74, bx = 14, by = H - 36;
+        const names = { plane: "飞机", train: "火车", car: "汽车" }, iw = 74, bx = 14, by = H - 36 - ($("tline").checked ? 30 : 0);
         ctx.beginPath(); ctx.roundRect(bx, by, used.length * iw + 8, 26, 5); ctx.fillStyle = th.bg; ctx.globalAlpha = .8; ctx.fill(); ctx.globalAlpha = 1;
         used.forEach((k, i) => { const cx = bx + 20 + i * iw, cy = by + 13;
           if (k === "plane") drawPlane(ctx, cx, cy, 0, 7, th); else drawVehicle(ctx, cx, cy, k, false, 6, th);
@@ -2968,6 +3121,7 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
     }
     if (track) LAST = { pts: list };
   } else if (track) LAST = { pts: [] };
+  if (hud) drawTimeline(ctx, frac, n);
   ctx.restore();
   return n;
 }
@@ -2988,6 +3142,25 @@ function play() {
   raf = requestAnimationFrame(tick);
 }
 $("play").onclick = play;
+(() => { let drag = false;
+  const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+  const inZone = h => $("tline").checked && STEPS.length > 1 && h.y > H - 40 && h.x > TL.x0 - 16 && h.x < TL.x1 + 16;
+  const seekTo = x => { prog = clamp01((x - TL.x0) / (TL.x1 - TL.x0)); playing = false; draw(); };
+  cv.addEventListener("pointerdown", e => { const h = pos(e); if (inZone(h)) { drag = true; try { cv.setPointerCapture(e.pointerId); } catch (_) {} seekTo(h.x); e.preventDefault(); } });
+  cv.addEventListener("pointermove", e => { const h = pos(e); if (drag) seekTo(h.x); else cv.style.cursor = inZone(h) ? "pointer" : ""; });
+  cv.addEventListener("pointerup", () => { drag = false; }); cv.addEventListener("pointercancel", () => { drag = false; });
+})();
+$("coverSave").onclick = async () => {
+  try {
+    const wd = +$("coverW").value || 2400, sc = wd / W, c = document.createElement("canvas"); c.width = wd; c.height = Math.round(H * sc);
+    const N = STEPS.length, mode = $("coverFrame").value, { F } = params(); let fr = prog, n = curCount();
+    if (mode === "final") { const [, b] = cineSpan(); fr = b > 0 ? 1 - b * .55 : 1; n = N; } else if (mode === "start") { fr = 0; n = 1; }
+    TRANSP = $("coverTr").checked; NOHUD = TRANSP;
+    try { drawScene(c.getContext("2d"), sc, n, Math.max(1, Math.ceil(N / F)), false, fr); } finally { TRANSP = false; NOHUD = false; }
+    const blob = await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error("生成图片失败")), "image/png"));
+    saveBlob(blob, $("coverTr").checked ? "cover-transparent.png" : "cover.png"); showToast("封面已导出（" + c.width + "×" + c.height + "）。"); draw();
+  } catch (e) { TRANSP = false; NOHUD = false; showToast(e.message, true); }
+};
 $("seek").addEventListener("input", e => { playing = false; prog = +e.target.value / 1000; draw(); });
 cv.addEventListener("pointermove", e => {
   const r = cv.getBoundingClientRect(), k = Math.min(r.width / W, r.height / H), ox = (r.width - W * k) / 2, oy = (r.height - H * k) / 2;
@@ -3012,7 +3185,7 @@ $("dlPng").onclick = async () => { try { saveBlob(await dlSize(), "world-map.png
 $("copyImg").onclick = async () => { try { await navigator.clipboard.write([new ClipboardItem({ "image/png": await dlSize() })]); showToast("图片已复制，可直接粘贴到 Word、PPT 或邮件。"); } catch (e) { showToast("当前环境不允许写入剪贴板，请使用下载按钮。", true); } };
 
 /* ---------- config ---------- */
-const CFG_IDS = ["proj", "lon0", "lat0", "theme", "grat", "borders", "provNames", "cnMin", "usMin", "euMin", "viewHold", "vRes", "vFps", "noant", "title", "ptColor", "ringColor", "sizeMode", "rmin", "rmax", "labels", "lblSize", "lines", "plane", "planeSize", "planeText", "swHold", "dur", "fps", "gifW", "hold", "loop", "sun", "sunStart", "sunSpan", "glow", "gstyle", "stars", "dof", "zoomK", "card", "odo", "cine", "cineIn", "cineOut"];
+const CFG_IDS = ["proj", "lon0", "lat0", "theme", "grat", "borders", "provNames", "cnMin", "usMin", "euMin", "viewHold", "vRes", "vFps", "noant", "title", "ptColor", "ringColor", "sizeMode", "rmin", "rmax", "labels", "lblSize", "lines", "plane", "planeSize", "planeText", "swHold", "dur", "fps", "gifW", "hold", "loop", "sun", "sunStart", "sunSpan", "glow", "gstyle", "stars", "lift", "flow", "lights", "drift", "breath", "trans", "tline", "dof", "zoomK", "card", "odo", "cine", "cineIn", "cineOut"];
 const getCfg = () => { const s = {}; CFG_IDS.forEach(id => { const el = $(id); s[id] = el.type === "checkbox" ? el.checked : el.value; }); return { app: "world-dots-tool", version: 1, settings: s }; };
 function applyCfg(obj) {
   const s = obj && (obj.settings || obj); if (!s || typeof s !== "object") throw new Error("不是有效的配置");
