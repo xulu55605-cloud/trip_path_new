@@ -75,6 +75,10 @@ main { min-width: 0; display: grid; gap: 10px; position: sticky; top: max(16px, 
 .paper { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: #000; }
 .paper canvas { display: block; width: 100%; height: auto; max-height: calc(100vh - 150px); object-fit: contain; }
 @media (max-width: 900px) { .paper canvas { max-height: none; } }
+.viewer aside { display: none; }
+.viewer .app { grid-template-columns: minmax(0, 1fr); max-width: 1280px; }
+.viewer main { position: static; }
+.viewer #copyImg, .viewer #dlPng { display: none; }
 .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .bar input[type=range] { flex: 1; min-width: 120px; }
 .readout { font-family: var(--font-num); font-size: 12.5px; color: var(--muted); min-height: 1.5em; min-width: 0; overflow-wrap: anywhere; }
@@ -159,6 +163,10 @@ main { min-width: 0; display: grid; gap: 10px; position: sticky; top: max(16px, 
 
   <section>
     <h2>更多特效</h2>
+    <label class="check"><input type="checkbox" id="aurora" checked> 极光（高纬度夜侧的流动光带；需开启昼夜晨昏线）</label>
+    <label class="check"><input type="checkbox" id="glint" checked> 海面太阳高光（需开启昼夜晨昏线）</label>
+    <label class="check"><input type="checkbox" id="ctry" checked> 国家点亮（去过的国家整块淡淡填色，并统计国家数）</label>
+    <label class="check"><input type="checkbox" id="heat" checked> 足迹热力（到访越多，光晕越亮、光柱越高）</label>
     <label class="check"><input type="checkbox" id="lift" checked> 航线弧线抬升（飞机沿弧线升空，地面留下影子；地球仪）</label>
     <label class="check"><input type="checkbox" id="flow" checked> 航线流光（已飞过的航线上有光点流动）</label>
     <label class="check"><input type="checkbox" id="lights" checked> 夜侧城市灯光（需开启昼夜晨昏线）</label>
@@ -233,6 +241,20 @@ main { min-width: 0; display: grid; gap: 10px; position: sticky; top: max(16px, 
   </section>
 
   <section>
+    <h2>导出画幅</h2>
+    <label>GIF / 视频 / 封面的画幅<select id="aspect"><option value="h" selected>横屏 16:9</option><option value="v">竖屏 9:16（适合短视频）</option></select></label>
+    <div class="note">竖屏时版面会自动重新排布；分辨率数字按“长边”计算（例如 1920 即 1080×1920）。</div>
+  </section>
+
+  <section>
+    <h2>一键分享页面</h2>
+    <div class="note">生成一个单独的 HTML 文件，内含当前路线和全部设置。对方用浏览器打开即可播放、拖动旋转、键盘操作，不需要安装任何东西；手机竖屏打开会自动用 9:16 画面。</div>
+    <label class="check"><input type="checkbox" id="shareAuto" checked> 打开后自动播放</label>
+    <label class="check"><input type="checkbox" id="shareLoop" checked> 播放结束后循环（对方一操作就停止）</label>
+    <button id="shareSave" class="primary">生成分享页面</button>
+  </section>
+
+  <section>
     <h2>导出封面静帧</h2>
     <div class="note">导出一张高清 PNG，当作海报或视频封面。透明背景只对地球仪有效（区域地图本身是满幅的），并会隐藏标题、里程计、时间轴等文字信息。</div>
     <div class="row">
@@ -269,6 +291,7 @@ main { min-width: 0; display: grid; gap: 10px; position: sticky; top: max(16px, 
   </div>
   <div class="readout" id="readout">鼠标移到点上可查看地点和坐标</div>
   <div class="toast" id="toast" role="status"></div>
+  <div class="note" id="keys">快捷键：空格 播放 / 暂停 · ← → 上一站 / 下一站 · Home / End 回到开头 / 结尾 · 拖动旋转地球 · 滚轮或双指缩放 · 双击或 R 复位视角 · F 全屏</div>
 </main>
 </div>
 
@@ -2437,7 +2460,7 @@ $("copyCoords").onclick = async () => {
 };
 
 /* ---------- map drawing ---------- */
-const W = 1200, H = 675, cv = $("cv");
+let W = 1200, H = 675; const cv = $("cv");
 const LAND = topojson.feature(TOPO, TOPO.objects.countries).features;
 const BORDER = topojson.mesh(TOPO, TOPO.objects.countries, (a, b) => a !== b);
 const THEMES = {
@@ -2521,17 +2544,17 @@ function camTarget(frac, n) {
   return { c: [C[0] + 360 * easeIO((t - .25) / .75), Cl], z: Zp };
 }
 // 球面采样：低分辨率网格上逐像素反算经纬度（夜半球阴影与真实地球配色共用，只反算一次）
-let NSC = null, ESC = [null, null];
+let NSC = null, ESC = [null, null, null, null];
 function globeSamples(p) {
   const [tx, ty] = p.translate(), R = p.scale(), K = 3, w = Math.ceil(W / K), h = Math.ceil(H / K), n = w * h;
-  const lon = new Float32Array(n), lat = new Float32Array(n), ok = new Uint8Array(n), R2 = R * R * 1.02;
+  const lon = new Float32Array(n), lat = new Float32Array(n), ok = new Uint8Array(n), nx = new Float32Array(n), ny = new Float32Array(n), nz = new Float32Array(n), R2 = R * R * 1.02;
   const x0 = Math.max(0, Math.floor((tx - R) / K) - 1), x1 = Math.min(w - 1, Math.ceil((tx + R) / K) + 1), y0 = Math.max(0, Math.floor((ty - R) / K) - 1), y1 = Math.min(h - 1, Math.ceil((ty + R) / K) + 1);
   for (let j = y0; j <= y1; j++) for (let i = x0; i <= x1; i++) {
     const px = i * K + K / 2, py = j * K + K / 2; if ((px - tx) * (px - tx) + (py - ty) * (py - ty) > R2) continue;
     const g = p.invert([px, py]); if (!g || !isFinite(g[0]) || !isFinite(g[1])) continue;
-    const o = j * w + i; lon[o] = g[0]; lat[o] = g[1]; ok[o] = 1;
+    const o = j * w + i; lon[o] = g[0]; lat[o] = g[1]; ok[o] = 1; const la = g[1] / DEG, lo = g[0] / DEG; nx[o] = Math.cos(la) * Math.cos(lo); ny[o] = Math.cos(la) * Math.sin(lo); nz[o] = Math.sin(la);
   }
-  return { w, h, K, lon, lat, ok, x0, x1, y0, y1 };
+  return { w, h, K, lon, lat, ok, nx, ny, nz, x0, x1, y0, y1 };
 }
 function sampleCanvas(slot, SM) { const c = ESC[slot] || (ESC[slot] = document.createElement("canvas")); c.width = SM.w; c.height = SM.h; return c; }
 function blitSmooth(x, path, c, SM) { x.save(); x.beginPath(); path({ type: "Sphere" }); x.clip(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(c, 0, 0, SM.w * SM.K, SM.h * SM.K); x.restore(); }
@@ -2547,6 +2570,45 @@ function nightShade(x, p, path, th, SM) {
   }
   cx.putImageData(img, 0, 0); blitSmooth(x, path, c, SM);
 }
+const sunVec = () => { const sun = sunAt(SIMT), sl = sun[0] / DEG, sd = sun[1] / DEG; return [Math.cos(sd) * Math.cos(sl), Math.cos(sd) * Math.sin(sl), Math.sin(sd)]; };
+const llVec = (lon, lat) => { const la = lat / DEG, lo = lon / DEG; return [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)]; };
+// 极光：沿两个地磁极的极光椭圆（约 21° 半径）生成流动的光幕，仅夜侧
+function auroraShade(x, path, SM, alpha) {
+  const S = sunVec(), poles = [llVec(-72.6, 80.7), llVec(127, -64.1)], c = sampleCanvas(2, SM), cx = c.getContext("2d"), img = cx.createImageData(SM.w, SM.h), d = img.data, T = TWK;
+  for (let j = SM.y0; j <= SM.y1; j++) for (let i = SM.x0; i <= SM.x1; i++) {
+    const o = j * SM.w + i; if (!SM.ok[o]) continue;
+    const nx = SM.nx[o], ny = SM.ny[o], nz = SM.nz[o], cs = nx * S[0] + ny * S[1] + nz * S[2]; let t = (cs + .1) / .28; t = t < 0 ? 0 : t > 1 ? 1 : t; const night = 1 - t * t * (3 - 2 * t); if (night < .05) continue;
+    let best = 0, ink = 0;
+    for (const pv of poles) { const dd = Math.acos(Math.max(-1, Math.min(1, nx * pv[0] + ny * pv[1] + nz * pv[2]))) * DEG, ring = Math.exp(-Math.pow((dd - 21) / 4.4, 2)); if (ring > best) { best = ring; ink = Math.max(0, Math.min(1, (21 - dd) / 8)); } }
+    if (best < .03) continue;
+    const ph = SM.lon[o] / DEG, w1 = .5 + .5 * Math.sin(ph * 7 + T * 14 + Math.sin(ph * 3 + T * 5) * 1.4), w2 = .5 + .5 * Math.sin(ph * 13 - T * 9 + 1.7);
+    const I = Math.min(1, best * (.3 + .7 * w1 * (.55 + .45 * w2)) * night * alpha * 1.15), q = o * 4;
+    d[q] = 70 + 120 * ink * .7; d[q + 1] = 255 - 165 * ink * .7; d[q + 2] = 150 + 105 * ink * .7; d[q + 3] = Math.round(I * 215);
+  }
+  cx.putImageData(img, 0, 0); x.save(); x.globalCompositeOperation = "lighter"; blitSmooth(x, path, c, SM); x.restore();
+}
+// 海面太阳高光：太阳与视线的半角方向上的镜面反射，先画在海洋上，陆地随后盖住
+function glintShade(x, path, SM, alpha) {
+  const S = sunVec(), [clo, cla] = camLL(), C = llVec(clo, cla); let hx = S[0] + C[0], hy = S[1] + C[1], hz = S[2] + C[2]; const hl = Math.hypot(hx, hy, hz); if (hl < .2) return; hx /= hl; hy /= hl; hz /= hl;
+  const c = sampleCanvas(3, SM), cx = c.getContext("2d"), img = cx.createImageData(SM.w, SM.h), d = img.data;
+  for (let j = SM.y0; j <= SM.y1; j++) for (let i = SM.x0; i <= SM.x1; i++) {
+    const o = j * SM.w + i; if (!SM.ok[o]) continue;
+    const nx = SM.nx[o], ny = SM.ny[o], nz = SM.nz[o], nh = nx * hx + ny * hy + nz * hz; if (nh < .9) continue;
+    if (nx * S[0] + ny * S[1] + nz * S[2] < .05) continue;
+    const a = Math.min(1, (.5 * Math.pow(nh, 45) + .8 * Math.pow(nh, 700)) * alpha), q = o * 4; d[q] = 255; d[q + 1] = 248; d[q + 2] = 226; d[q + 3] = Math.round(a * 235);
+  }
+  cx.putImageData(img, 0, 0); x.save(); x.globalCompositeOperation = "lighter"; blitSmooth(x, path, c, SM); x.restore();
+}
+// 国家点亮：用 geoContains 找出每个地点所在的国家（带缓存）
+const CTRYC = new Map();
+function ctryIdx(st) {
+  if (CTRYC.has(st.key)) return CTRYC.get(st.key);
+  const at = (la, lo) => LAND.findIndex(f => d3.geoContains(f, [lo, la]));
+  let r = at(st.lat, st.lon);
+  if (r < 0) for (const [da, db] of [[.3, 0], [-.3, 0], [0, .3], [0, -.3], [.25, .25], [-.25, .25], [.25, -.25], [-.25, -.25], [.6, 0], [-.6, 0], [0, .6], [0, -.6]]) { r = at(st.lat + da, st.lon + db); if (r >= 0) break; }
+  CTRYC.set(st.key, r); return r;
+}
+const ctryCount = n => { if (!$("ctry").checked) return 0; const set = new Set(); for (let i = 0; i < n; i++) { const c = ctryIdx(STEPS[i]); if (c >= 0) set.add(LAND[c].properties && LAND[c].properties.name || c); } return set.size; };
 // ---- 真实地球配色：按经纬度程序化生成陆地色（植被/沙漠/雨林/苔原/冰雪）和云层 ----
 const EMAPS = {};
 function earthMap(goog) {
@@ -2592,9 +2654,9 @@ function earthLayers(SM, goog, drift) {
   lx.putImageData(li, 0, 0); cx.putImageData(ci, 0, 0); return { land: lc, cloud: goog ? null : cc };
 }
 // 星空：固定随机星点，随相机经纬度做视差平移；闪烁相位由 TWK 决定
-let STARS = null, TWK = 0;
+let STARS = null, STARSKEY = "", TWK = 0;
 function drawStars(x) {
-  if (!STARS) { let a = 20261019; const rnd = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  if (!STARS || STARSKEY !== W + "x" + H) { STARSKEY = W + "x" + H; let a = 20261019; const rnd = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
     STARS = Array.from({ length: 520 }, () => { const m = rnd(); return { x: rnd() * W, y: rnd() * H, r: m > .97 ? 1.5 + rnd() * .6 : m > .8 ? .9 + rnd() * .4 : .4 + rnd() * .4, ph: rnd() * 6.283, sp: .6 + rnd() * 1.4, b: .45 + rnd() * .55, hue: rnd() }; }); }
   const [lon, lat] = camLL(), ox = (((-lon / 360 * W * 1.6) % W) + W) % W, oy = (((lat / 180 * H * 1.2) % H) + H) % H;
   x.save();
@@ -2611,8 +2673,8 @@ const skyOn = () => projKey() === "ortho" && $("stars").checked && $("theme").va
 let HUDE = null;   // 地图切换过渡中：区域地图所占的混合比例 E（>=0.5 时标题用浅色配色会看不清，故改回主题色）
 const hudC = () => (HUDE != null ? (isGlobeAuto() && $("stars").checked && $("theme").value === "light" && HUDE < .5) : skyOn()) ? THEMES.dark : theme();
 const googleOn = () => projKey() === "ortho" && $("gstyle").value === "google";
-let MORPH = null, TRANSP = false, NOHUD = false, CLDRIFT = 0;
-const TL = { x0: 90, x1: W - 90 }, DEG = 180 / Math.PI;
+let MORPH = null, TRANSP = false, NOHUD = false, CLDRIFT = 0, EXPORTING = false, MAN = { dx: 0, dy: 0, z: 1 }, ORBIT = false, USERTOUCH = false;
+const TL = { get x0() { return 90; }, get x1() { return W - 90; } }, DEG = 180 / Math.PI;
 const lerpColor = (a, b, t) => { const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16)), pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16)); return "rgb(" + pa.map((v, i) => Math.round(v + (pb[i] - v) * t)).join(",") + ")"; };
 // ---- 夜侧城市灯光：世界主要城市 + 周边随机卫星点，按太阳高度角点亮 ----
 const CITY_STR = "139.7,35.7,3;135.5,34.7,2;127,37.5,3;116.4,39.9,3;121.5,31.2,3;113.3,23.1,3;114.1,22.5,2;114.2,22.3,2;104.1,30.7,2;106.5,29.6,2;114.3,30.6,2;108.9,34.3,2;117.2,39.1,2;118.8,32.1,2;120.2,30.3,2;123.4,41.8,1;126.6,45.8,1;121.5,25,2;121,14.6,2;105.8,21,2;106.7,10.8,2;100.5,13.8,3;103.8,1.35,2;101.7,3.1,2;106.8,-6.2,3;112.7,-7.3,1;77.2,28.6,3;72.9,19.1,3;88.4,22.6,2;77.6,13,2;80.3,13.1,2;78.5,17.4,2;67,24.9,2;74.3,31.5,2;90.4,23.8,3;85.3,27.7,1;79.9,6.9,1;51.4,35.7,2;44.4,33.3,2;46.7,24.7,2;39.2,21.5,1;55.3,25.2,2;29,41,3;32.9,39.9,1;34.8,32.1,1;31.2,30,3;29.9,31.2,1;3.4,6.5,3;7.5,9.1,1;-0.2,5.6,1;-17.4,14.7,1;15.3,-4.3,2;13.2,-8.8,1;36.8,-1.3,2;38.7,9,1;32.5,15.6,1;28,-26.2,2;18.4,-33.9,1;31,-29.9,1;-7.6,33.6,1;3.1,36.8,1;10.2,36.8,1;37.6,55.8,3;30.3,59.9,2;30.5,50.5,2;21,52.2,2;13.4,52.5,2;10,53.6,1;11.6,48.1,1;8.7,50.1,1;2.35,48.9,3;4.8,45.8,1;5.4,43.3,1;-0.1,51.5,3;-2.2,53.5,1;-6.3,53.3,1;-3.7,40.4,2;2.2,41.4,2;-9.1,38.7,1;12.5,41.9,2;9.2,45.5,2;23.7,38,1;16.4,48.2,1;19,47.5,1;14.4,50.1,1;26.1,44.4,1;4.9,52.4,2;4.35,50.85,1;18.1,59.3,1;10.75,59.9,1;12.6,55.7,1;25,60.2,1;82.9,55,1;60.6,56.8,1;69.2,41.3,1;76.9,43.2,1;106.9,47.9,1;131.9,43.1,1;151.2,-33.9,2;145,-37.8,2;153,-27.5,1;115.9,-32,1;174.8,-36.8,1;-74,40.7,3;-71.1,42.4,2;-77,38.9,2;-75.2,40,1;-87.6,41.9,3;-83,42.3,1;-79.4,43.7,2;-73.6,45.5,1;-80.2,25.8,2;-84.4,33.7,2;-96.8,32.8,2;-95.4,29.8,2;-105,39.7,1;-112,33.4,1;-118.2,34.1,3;-122.4,37.8,2;-122.3,47.6,1;-123.1,49.3,1;-115.1,36.2,1;-99.1,19.4,3;-103.3,20.7,1;-100.3,25.7,1;-82.4,23.1,1;-74.1,4.7,2;-77,-12,2;-78.5,-.2,1;-66.9,10.5,1;-70.7,-33.4,2;-58.4,-34.6,3;-46.6,-23.5,3;-43.2,-22.9,2;-47.9,-15.8,1;-43.9,-19.9,1;-38.5,-13,1;-34.9,-8,1;-56.2,-34.9,1";
@@ -2663,7 +2725,9 @@ function morphBase(s) {
     else { g.addColorStop(0, `rgba(110,185,255,${.55 * A})`); g.addColorStop(.3, `rgba(70,140,240,${.24 * A})`); g.addColorStop(1, "rgba(40,100,220,0)"); }
     x.fillStyle = g; x.beginPath(); x.arc(tx, ty, R * 1.13, 0, 6.2832); x.fill(); }
   const oceanG = goog ? "#a6cff4" : real ? "#0b2c63" : th.ocean, landG = goog ? "#eeeae0" : real ? "#566e3e" : th.land;
+  const fa = clamp01(1 - 3 * t), night = isGlobeAuto() && $("sun").checked && SIMT != null && fa > 0, SM = (real || goog || night) && fa > 0 ? globeSamples(pg) : null;
   x.beginPath(); path({ type: "Sphere" }); x.fillStyle = lerpColor(oceanG, th.ocean, t); x.fill();
+  if (night && $("glint").checked) glintShade(x, gpath, SM, fa);
   if (t > 0) { x.globalAlpha = t; x.fillStyle = th.ocean; x.fillRect(0, 0, W, H); x.globalAlpha = 1; }
   if ($("grat").checked) { x.beginPath(); path(d3.geoGraticule10()); x.strokeStyle = th.grid; x.lineWidth = .8; x.stroke(); }
   x.beginPath(); LAND.forEach(f => { if ($("noant").checked && f.properties && f.properties.name === "Antarctica") return; path(f); });
@@ -2672,12 +2736,11 @@ function morphBase(s) {
   if (t > 0) { x.save(); x.globalAlpha = t; x.beginPath(); rg.F.forEach(f => path(f)); x.fillStyle = th.land; x.fill();
     if ($("borders").checked) { x.beginPath(); path(rg.IN); x.strokeStyle = th.border; x.lineWidth = .8; x.stroke(); }
     x.beginPath(); path(rg.OUT); x.strokeStyle = th.sub; x.lineWidth = 1.4; x.lineJoin = "round"; x.stroke(); x.restore(); }
-  const fa = clamp01(1 - 3 * t), night = isGlobeAuto() && $("sun").checked && SIMT != null && fa > 0, SM = (real || goog || night) && fa > 0 ? globeSamples(pg) : null;
   if (SM && (real || goog)) { const L = earthLayers(SM, goog, $("drift").checked ? CLDRIFT : 0), a = fa;
     x.save(); x.globalAlpha = a; x.beginPath(); LAND.forEach(f => { if ($("noant").checked && f.properties && f.properties.name === "Antarctica") return; gpath(f); }); x.clip();
     x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(L.land, 0, 0, SM.w * SM.K, SM.h * SM.K); x.restore();
     if (L.cloud) { x.save(); x.globalAlpha = a; blitSmooth(x, gpath, L.cloud, SM); x.restore(); } }
-  if (night) { x.save(); x.globalAlpha = fa; nightShade(x, pg, gpath, th, SM); x.restore(); if ($("lights").checked) drawLights(x, pg, fa); }
+  if (night) { x.save(); x.globalAlpha = fa; nightShade(x, pg, gpath, th, SM); x.restore(); if ($("aurora").checked) auroraShade(x, gpath, SM, fa); if ($("lights").checked) drawLights(x, pg, fa); }
   return c;
 }
 // ---- 底部时间轴 ----
@@ -2829,7 +2892,7 @@ function makeProj0() {
 const BC = new Map();
 function getBase(s) {
   if (MORPH) return morphBase(s);
-  const noC = PTF || TRANSP || (isGlobeAuto() && projKey() === "ortho"), key = [PTF ? "T" : "", projKey(), $("lon0").value, $("lat0").value, $("theme").value, $("grat").checked, $("borders").checked, $("noant").checked, $("provNames").checked, $("glow").checked, $("gstyle").value, $("stars").checked, s].join("|");
+  const noC = PTF || TRANSP || (isGlobeAuto() && projKey() === "ortho"), key = [W + "x" + H, PTF ? "T" : "", projKey(), $("lon0").value, $("lat0").value, $("theme").value, $("grat").checked, $("borders").checked, $("noant").checked, $("provNames").checked, $("glow").checked, $("gstyle").value, $("stars").checked, s].join("|");
   if (!noC && BC.has(key)) return BC.get(key);
   const th = theme(), c = document.createElement("canvas"); c.width = Math.round(W * s); c.height = Math.round(H * s);
   const x = c.getContext("2d"); x.scale(s, s);
@@ -2866,13 +2929,14 @@ function getBase(s) {
   else if (goog) { const [tx, ty] = p.translate(), R = p.scale(), g = x.createRadialGradient(tx - R * .2, ty - R * .2, 0, tx, ty, R); g.addColorStop(0, "#b4dafc"); g.addColorStop(.7, "#a6cff4"); g.addColorStop(1, "#8bb8e6"); x.fillStyle = g; }
   else x.fillStyle = th.ocean;
   x.fill();
+  if (night && $("glint").checked) glintShade(x, path, SM, 1);
   if ($("grat").checked) { x.beginPath(); path(d3.geoGraticule10()); x.strokeStyle = real ? "rgba(255,255,255,.07)" : goog ? "rgba(255,255,255,.3)" : th.grid; x.lineWidth = 0.8; x.stroke(); }
   x.beginPath(); LAND.forEach(f => { if ($("noant").checked && f.properties && f.properties.name === "Antarctica") return; path(f); });
   if (real || goog) { const L = earthLayers(SM, goog, $("drift").checked ? CLDRIFT : 0); x.save(); x.clip(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(L.land, 0, 0, SM.w * SM.K, SM.h * SM.K); x.restore(); window.__cl = L.cloud; }
   else { x.fillStyle = th.land; x.fill(); }
   if ($("borders").checked) { x.beginPath(); path(BORDER); x.strokeStyle = real ? "rgba(255,255,255,.22)" : goog ? "rgba(140,132,156,.8)" : th.border; x.lineWidth = real ? .5 : goog ? .7 : 0.6; x.stroke(); }
   if (real && window.__cl) { blitSmooth(x, path, window.__cl, SM); window.__cl = null; }
-  if (night) { nightShade(x, p, path, th, SM); if ($("lights").checked) drawLights(x, p, 1); }
+  if (night) { nightShade(x, p, path, th, SM); if ($("aurora").checked) auroraShade(x, path, SM, 1); if ($("lights").checked) drawLights(x, p, 1); }
   if (goog) { // 受光明暗 + 边缘大气薄雾
     const [tx, ty] = p.translate(), R = p.scale(); let g = x.createRadialGradient(tx - R * .35, ty - R * .35, R * .1, tx, ty, R * 1.05);
     g.addColorStop(0, "rgba(255,255,255,.16)"); g.addColorStop(.55, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(25,50,100,.26)"); x.fillStyle = g; x.beginPath(); path({ type: "Sphere" }); x.fill();
@@ -2944,7 +3008,7 @@ function drawHud(ctx, n) {
   const th = theme(), N = STEPS.length;
   ctx.textBaseline = "alphabetic"; ctx.textAlign = "left"; ctx.fillStyle = hudC().text; ctx.font = "600 21px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif"; ctx.fillText($("title").value, 22, 34);
   const k = new Set(STEPS.slice(0, n).map(x => x.key)).size;
-  ctx.fillStyle = hudC().sub; ctx.font = "13px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif"; ctx.fillText(N ? `已标注 ${k} 个地点 · 第 ${n} / ${N} 次` : "请先在左侧导入地点", 22, 55);
+  ctx.fillStyle = hudC().sub; ctx.font = "13px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif"; ctx.fillText(N ? `已标注 ${k} 个地点${ctryCount(n) ? " · " + ctryCount(n) + " 个国家/地区" : ""} · 第 ${n} / ${N} 次` : "请先在左侧导入地点", 22, 55);
 }
 let LAYERS = null;
 const easeIO = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
@@ -2955,7 +3019,8 @@ function drawScene(ctx, s, n, recent, track, frac) {
   { const st0 = Date.parse(($("sunStart").value || "2026-10-19T08:00") + ":00Z"); CLDRIFT = SIMT != null ? (SIMT - st0) / 3.6e6 * .3 : TWK * 20; }
   if (glob) { const cz = camTarget(frac, n);
     if (cz) { GCAM = cz.c; GZOOM = cz.z;
-      if ($("breath").checked && TWK > 0) { const k = TWK * 6.2832, f = 1 / cz.z; GCAM = [cz.c[0] + 2.2 * f * Math.sin(k * 2.3), cz.c[1] + 1.3 * f * Math.sin(k * 1.7 + 1)]; GZOOM = cz.z * (1 + .012 * Math.sin(k * 3.1)); } } }
+      if ($("breath").checked && TWK > 0) { const k = TWK * 6.2832, f = 1 / cz.z; GCAM = [cz.c[0] + 2.2 * f * Math.sin(k * 2.3), cz.c[1] + 1.3 * f * Math.sin(k * 1.7 + 1)]; GZOOM = cz.z * (1 + .012 * Math.sin(k * 3.1)); }
+      if (!EXPORTING && !TRANSP && (MAN.dx || MAN.dy || MAN.z !== 1)) { GCAM = [GCAM[0] + MAN.dx, Math.max(-85, Math.min(85, GCAM[1] + MAN.dy))]; GZOOM *= MAN.z; } } }
   if (!isAuto()) { CURVIEW = null; return drawLayer(ctx, s, n, recent, track, frac, true); }
   const N = STEPS.length, plane = $("plane").checked && N > 1 && frac != null; let view = "world", from = null, e = 0;
   if (N > 1) {
@@ -3001,6 +3066,11 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
     const key = rkey, set = new Set(); for (let i = 0; i < n; i++) { if (STEPS[i].reg === key) set.add(STEPS[i].ri); }
     if (set.size) { const gp = d3.geoPath(p, ctx); ctx.beginPath(); set.forEach(i => gp(REG[key].F[i])); ctx.fillStyle = ptC; ctx.globalAlpha = .2 * hm; ctx.fill(); ctx.globalAlpha = .75 * hm; ctx.lineWidth = 1.3; ctx.strokeStyle = ptC; ctx.stroke(); ctx.globalAlpha = 1; }
   }
+  if ($("ctry").checked && N && !REG[projKey()] && !lite) {
+    const cs = new Set(); for (let i = 0; i < n; i++) { const c = ctryIdx(STEPS[i]); if (c >= 0) cs.add(c); }
+    if (cs.size) { const gp = d3.geoPath(p, ctx); ctx.save(); ctx.beginPath(); cs.forEach(i => gp(LAND[i])); ctx.fillStyle = ptC; ctx.globalAlpha = CINE.ph === "outro" ? .38 : .22; ctx.fill();
+      ctx.lineJoin = "round"; ctx.lineWidth = 1.1; ctx.strokeStyle = ptC; ctx.globalAlpha = .7; ctx.stroke(); ctx.restore(); }
+  }
   const vis = (lat, lon) => !clipd || d3.geoDistance([lon, lat], c0) < Math.PI / 2 - 0.02;
   // title + counter
   ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
@@ -3008,7 +3078,7 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
   const acc = new Map();
   for (let i = 0; i < n; i++) { const st = STEPS[i]; const e = acc.get(st.key); if (e) { e.w += st.w; e.cnt++; } else acc.set(st.key, { lat: st.lat, lon: st.lon, w: st.w, cnt: 1, name: st.name, first: i }); }
   ctx.fillStyle = hudC().sub; ctx.font = "13px 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif";
-  if (hud) ctx.fillText(N ? `已标注 ${acc.size} 个地点 · 第 ${n} / ${N} 次` : "请先在左侧导入地点", 22, 55);
+  if (hud) ctx.fillText(N ? `已标注 ${acc.size} 个地点${ctryCount(n) ? " · " + ctryCount(n) + " 个国家/地区" : ""} · 第 ${n} / ${N} 次` : "请先在左侧导入地点", 22, 55);
   if (hud) drawOdo(ctx, frac, n);
   const pts = [];
   if (N) {
@@ -3049,6 +3119,14 @@ function drawLayer(ctx, s, n, recent, track, frac, hud, lite) {
         ctx.beginPath(); [...segs.plane, ...segs.train, ...segs.car].forEach(c => path({ type: "LineString", coordinates: c })); ctx.stroke(); ctx.restore(); strokePolys(2.6, ptC, .8 * k, 14); }
     }
     const list = [...acc.values()].map(e => { const q = vis(e.lat, e.lon) ? p([e.lon, e.lat]) : null; return q ? { ...e, x: q[0], y: q[1], r: rad(e.w) } : null; }).filter(Boolean);
+    if ($("heat").checked && !lite) {   // 足迹热力：光晕 + 光柱
+      ctx.save();
+      list.forEach(e => { const f = vmax > vmin ? clamp01((e.w - vmin) / (vmax - vmin)) : 0, hot = Math.max(f, e.cnt >= 2 ? .35 : 0), rr = e.r * (2.6 + 5 * hot), g = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, rr);
+        g.addColorStop(0, `rgba(255,120,40,${(.18 + .5 * hot).toFixed(3)})`); g.addColorStop(1, "rgba(255,90,30,0)"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(e.x, e.y, rr, 0, 6.2832); ctx.fill();
+        if (hot > .3) { const len = 16 + 80 * hot, wd = 2 + 3.5 * hot, pg = ctx.createLinearGradient(0, e.y, 0, e.y - len); pg.addColorStop(0, `rgba(255,190,90,${(.35 + .5 * hot).toFixed(3)})`); pg.addColorStop(1, "rgba(255,120,40,0)");
+          ctx.fillStyle = pg; ctx.fillRect(e.x - wd / 2, e.y - len, wd, len); ctx.fillStyle = `rgba(255,230,170,${(.5 + .4 * hot).toFixed(3)})`; ctx.beginPath(); ctx.arc(e.x, e.y - len, wd * .9, 0, 6.2832); ctx.fill(); } });
+      ctx.restore();
+    }
     list.slice().sort((a, b) => b.r - a.r).forEach(e => {
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, 6.2832); ctx.fillStyle = ptC; ctx.globalAlpha = .82; ctx.fill(); ctx.globalAlpha = 1;
       ctx.lineWidth = 1.2; ctx.strokeStyle = th.bg; ctx.stroke();
@@ -3131,28 +3209,74 @@ let prog = 1, playing = false, t0 = 0, raf = 0;
 const params = () => { const dur = Math.max(0.5, +$("dur").value || 3), fps = +$("fps").value || 20; return { dur, fps, F: Math.max(2, Math.round(dur * fps)) }; };
 const curCount = () => Math.min(STEPS.length, Math.ceil(STEPS.length * prog));
 function draw() {
+  if (EXPORTING) return;
+  cv.style.touchAction = isGlobeAuto() ? "none" : "";
   const { F } = params(), N = STEPS.length;
   drawScene(cv.getContext("2d"), 1, curCount(), Math.max(1, Math.ceil(N / F)), true, prog);
   $("seek").value = Math.round(prog * 1000);
 }
 let sched = 0; const redraw = () => { cancelAnimationFrame(sched); sched = requestAnimationFrame(draw); };
-function play() {
-  cancelAnimationFrame(raf); prog = 0; playing = true; t0 = performance.now(); const { dur } = params();
-  const tick = now => { if (!playing) return; prog = Math.min(1, (now - t0) / (dur * 1000)); draw(); if (prog < 1) raf = requestAnimationFrame(tick); else playing = false; };
+function play(from) {
+  cancelAnimationFrame(raf); if (typeof from !== "number") MAN = { dx: 0, dy: 0, z: 1 }; prog = typeof from === "number" ? from : 0; playing = true; const { dur } = params(); t0 = performance.now() - prog * dur * 1000;
+  const tick = now => { if (!playing) return; prog = Math.min(1, (now - t0) / (dur * 1000)); springBack(); draw(); if (prog < 1) raf = requestAnimationFrame(tick); else playing = false; };
   raf = requestAnimationFrame(tick);
 }
-$("play").onclick = play;
-(() => { let drag = false;
+$("play").onclick = () => play();
+function springBack() { if (ORBIT) return; MAN.dx *= .93; MAN.dy *= .93; MAN.z += (1 - MAN.z) * .05; if (Math.abs(MAN.dx) < .02) MAN.dx = 0; if (Math.abs(MAN.dy) < .02) MAN.dy = 0; if (Math.abs(MAN.z - 1) < .003) MAN.z = 1; }
+function togglePlay() { USERTOUCH = true; if (playing) { playing = false; cancelAnimationFrame(raf); } else if (prog >= .999) play(); else play(prog); }
+(() => {
+  let mode = null, lastD = 0; const ptrs = new Map();
   const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
   const inZone = h => $("tline").checked && STEPS.length > 1 && h.y > H - 40 && h.x > TL.x0 - 16 && h.x < TL.x1 + 16;
   const seekTo = x => { prog = clamp01((x - TL.x0) / (TL.x1 - TL.x0)); playing = false; draw(); };
-  cv.addEventListener("pointerdown", e => { const h = pos(e); if (inZone(h)) { drag = true; try { cv.setPointerCapture(e.pointerId); } catch (_) {} seekTo(h.x); e.preventDefault(); } });
-  cv.addEventListener("pointermove", e => { const h = pos(e); if (drag) seekTo(h.x); else cv.style.cursor = inZone(h) ? "pointer" : ""; });
-  cv.addEventListener("pointerup", () => { drag = false; }); cv.addEventListener("pointercancel", () => { drag = false; });
+  const redrawNow = () => { if (!playing) draw(); };
+  cv.addEventListener("pointerdown", e => {
+    const h = pos(e);
+    if (inZone(h)) { mode = "tl"; USERTOUCH = true; try { cv.setPointerCapture(e.pointerId); } catch (_) { } seekTo(h.x); e.preventDefault(); return; }
+    if (!isGlobeAuto()) return;
+    USERTOUCH = true; ORBIT = true; mode = "orbit"; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { cv.setPointerCapture(e.pointerId); } catch (_) { }
+    if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; lastD = Math.hypot(a.x - b.x, a.y - b.y); }
+    cv.style.cursor = "grabbing"; e.preventDefault();
+  });
+  cv.addEventListener("pointermove", e => {
+    const h = pos(e);
+    if (mode === "tl") { seekTo(h.x); return; }
+    if (mode === "orbit" && ptrs.has(e.pointerId)) {
+      const pv = ptrs.get(e.pointerId), dxp = e.clientX - pv.x, dyp = e.clientY - pv.y; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (ptrs.size >= 2) { const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (lastD > 0) MAN.z = Math.max(.5, Math.min(4, MAN.z * d / lastD)); lastD = d; }
+      else { const k = W / cv.getBoundingClientRect().width, dpp = 57.3 / (284 * (GZOOM || 1)) * k; MAN.dx -= dxp * dpp; MAN.dy += dyp * dpp; MAN.dy = Math.max(-80, Math.min(80, MAN.dy)); }
+      redrawNow(); return;
+    }
+    cv.style.cursor = inZone(h) ? "pointer" : isGlobeAuto() ? "grab" : "";
+  });
+  const up = e => { ptrs.delete(e.pointerId); if (mode === "orbit" && ptrs.size === 0) { mode = null; ORBIT = false; cv.style.cursor = "grab"; } else if (mode === "tl") mode = null; lastD = 0; };
+  cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+  cv.addEventListener("wheel", e => { if (!isGlobeAuto()) return; e.preventDefault(); USERTOUCH = true; MAN.z = Math.max(.5, Math.min(4, MAN.z * Math.exp(-e.deltaY * .0012))); redrawNow(); }, { passive: false });
+  cv.addEventListener("dblclick", () => { MAN = { dx: 0, dy: 0, z: 1 }; redrawNow(); });
 })();
+function stepStation(dir) {
+  const N = STEPS.length; if (N < 2) return; USERTOUCH = true; playing = false; cancelAnimationFrame(raf);
+  const g = $("plane").checked ? stationTimes() : STEPS.map((_, i) => i / (N - 1));
+  if (dir > 0) { const i = g.findIndex(v => v > prog + .002); prog = i < 0 ? 1 : Math.min(1, g[i] + 1e-4); }
+  else { let k = -1; g.forEach((v, i) => { if (v < prog - .004) k = i; }); prog = k < 0 ? 0 : Math.min(1, g[k] + 1e-4); }
+  draw();
+}
+document.addEventListener("keydown", e => {
+  const t = e.target, tag = t && t.tagName; if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (tag === "TEXTAREA" || tag === "SELECT" || (tag === "INPUT" && t.type !== "range" && t.type !== "checkbox")) return;
+  if (tag === "BUTTON" && (e.key === " " || e.key === "Enter")) return;
+  const k = e.key; let used = true;
+  if (k === " ") togglePlay(); else if (k === "ArrowRight") stepStation(1); else if (k === "ArrowLeft") stepStation(-1);
+  else if (k === "Home") { USERTOUCH = true; playing = false; prog = 0; draw(); } else if (k === "End") { USERTOUCH = true; playing = false; prog = 1; draw(); }
+  else if (k === "r" || k === "R" || k === "Escape") { MAN = { dx: 0, dy: 0, z: 1 }; if (!playing) draw(); }
+  else if (k === "+" || k === "=") { MAN.z = Math.min(4, MAN.z * 1.15); if (!playing) draw(); } else if (k === "-" || k === "_") { MAN.z = Math.max(.5, MAN.z / 1.15); if (!playing) draw(); }
+  else if (k === "f" || k === "F") { const el = cv.parentElement; if (document.fullscreenElement) document.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen(); }
+  else used = false;
+  if (used) e.preventDefault();
+});
 $("coverSave").onclick = async () => {
   try {
-    const wd = +$("coverW").value || 2400, sc = wd / W, c = document.createElement("canvas"); c.width = wd; c.height = Math.round(H * sc);
+    const wd = +$("coverW").value || 2400, sc = wd / Math.max(W, H), c = document.createElement("canvas"); c.width = Math.round(W * sc); c.height = Math.round(H * sc);
     const N = STEPS.length, mode = $("coverFrame").value, { F } = params(); let fr = prog, n = curCount();
     if (mode === "final") { const [, b] = cineSpan(); fr = b > 0 ? 1 - b * .55 : 1; n = N; } else if (mode === "start") { fr = 0; n = 1; }
     TRANSP = $("coverTr").checked; NOHUD = TRANSP;
@@ -3185,7 +3309,7 @@ $("dlPng").onclick = async () => { try { saveBlob(await dlSize(), "world-map.png
 $("copyImg").onclick = async () => { try { await navigator.clipboard.write([new ClipboardItem({ "image/png": await dlSize() })]); showToast("图片已复制，可直接粘贴到 Word、PPT 或邮件。"); } catch (e) { showToast("当前环境不允许写入剪贴板，请使用下载按钮。", true); } };
 
 /* ---------- config ---------- */
-const CFG_IDS = ["proj", "lon0", "lat0", "theme", "grat", "borders", "provNames", "cnMin", "usMin", "euMin", "viewHold", "vRes", "vFps", "noant", "title", "ptColor", "ringColor", "sizeMode", "rmin", "rmax", "labels", "lblSize", "lines", "plane", "planeSize", "planeText", "swHold", "dur", "fps", "gifW", "hold", "loop", "sun", "sunStart", "sunSpan", "glow", "gstyle", "stars", "lift", "flow", "lights", "drift", "breath", "trans", "tline", "dof", "zoomK", "card", "odo", "cine", "cineIn", "cineOut"];
+const CFG_IDS = ["proj", "lon0", "lat0", "theme", "grat", "borders", "provNames", "cnMin", "usMin", "euMin", "viewHold", "vRes", "vFps", "noant", "title", "ptColor", "ringColor", "sizeMode", "rmin", "rmax", "labels", "lblSize", "lines", "plane", "planeSize", "planeText", "swHold", "dur", "fps", "gifW", "hold", "loop", "sun", "sunStart", "sunSpan", "glow", "gstyle", "stars", "aurora", "glint", "ctry", "heat", "lift", "flow", "lights", "drift", "breath", "trans", "tline", "dof", "zoomK", "card", "odo", "cine", "cineIn", "cineOut"];
 const getCfg = () => { const s = {}; CFG_IDS.forEach(id => { const el = $(id); s[id] = el.type === "checkbox" ? el.checked : el.value; }); return { app: "world-dots-tool", version: 1, settings: s }; };
 function applyCfg(obj) {
   const s = obj && (obj.settings || obj); if (!s || typeof s !== "object") throw new Error("不是有效的配置");
@@ -3260,7 +3384,7 @@ $("gifSave").onclick = async () => {
   if (!STEPS.length) { msg.textContent = "还没有可以标注的地点"; msg.classList.add("warn"); return; }
   gifBusy = true; $("gifSave").disabled = true;
   try {
-    const N = STEPS.length, { fps, F } = params(), ow = +$("gifW").value || 900, s = ow / W, cw = Math.round(W * s), ch = Math.round(H * s);
+    const N = STEPS.length, { fps, F } = params(), ow = +$("gifW").value || 900, s = ow / Math.max(W, H), cw = Math.round(W * s), ch = Math.round(H * s);
     const c = document.createElement("canvas"); c.width = cw; c.height = ch; const ctx = c.getContext("2d", { willReadFrequently: true });
     const recent = Math.max(1, Math.ceil(N / F)), nAt = k => Math.min(N, Math.ceil(N * (k + 1) / F));
     msg.textContent = "正在准备调色板…"; await new Promise(r => setTimeout(r));
@@ -3303,7 +3427,7 @@ $("vidSave").onclick = async () => {
   if (!STEPS.length) { msg.textContent = "还没有可以标注的地点"; msg.classList.add("warn"); return; }
   vidBusy = true; $("vidSave").disabled = true;
   try {
-    const N = STEPS.length, ow = +$("vRes").value || 1920, s = ow / W, cw = Math.round(W * s) & ~1, ch = Math.round(H * s) & ~1, fps = +$("vFps").value || 30;
+    const N = STEPS.length, ow = +$("vRes").value || 1920, s = ow / Math.max(W, H), cw = Math.round(W * s) & ~1, ch = Math.round(H * s) & ~1, fps = +$("vFps").value || 30;
     const dur = Math.max(0.5, +$("dur").value || 3), F = Math.max(2, Math.round(dur * fps)), holdF = Math.round(Math.max(0, +$("hold").value || 0) * fps), T = F + holdF;
     const recent = Math.max(1, Math.ceil(N / F)), nAt = k => Math.min(N, Math.ceil(N * (k + 1) / F)), fr = k => Math.min(1, k / (F - 1));
     const c = document.createElement("canvas"); c.width = cw; c.height = ch; const ctx = c.getContext("2d");
@@ -3371,5 +3495,40 @@ $("vidSave").onclick = async () => {
   finally { vidBusy = false; $("vidSave").disabled = false; }
 };
 
-$("sample").click();
+function setDims(w, h) { W = w; H = h; BC.clear(); LAYERS = null; }
+async function withAspect(fn) {
+  if ($("aspect").value !== "v") return fn();
+  EXPORTING = true; setDims(675, 1200);
+  try { return await fn(); } finally { setDims(1200, 675); EXPORTING = false; draw(); }
+}
+["gifSave", "vidSave", "coverSave"].forEach(id => { const el = $(id), h = el.onclick; el.onclick = () => withAspect(() => h.call(el)); });
+
+function shareHTML() {
+  const payload = { rows: ROWS, ov: [...OV], cfg: getCfg().settings, title: $("title").value, autoplay: $("shareAuto").checked, loop: $("shareLoop").checked };
+  const root = document.documentElement.cloneNode(true);
+  root.querySelectorAll("script").forEach(sc => { if (sc.id === "share-data" || (/serviceWorker/.test(sc.textContent) && sc.textContent.length < 2000)) sc.remove(); });
+  root.querySelectorAll('link[rel="manifest"]').forEach(l => l.remove());
+  ["gifBox", "vidBox"].forEach(id => { const b = root.querySelector("#" + id); if (b) { b.hidden = true; b.querySelectorAll("[src]").forEach(n => n.removeAttribute("src")); } });
+  const head = root.querySelector("head"), sd = document.createElement("script"); sd.id = "share-data";
+  sd.textContent = "window.__SHARE__=" + JSON.stringify(payload).replace(/</g, "\\u003c") + ";"; head.insertBefore(sd, head.firstChild);
+  if (!head.querySelector("meta[name=viewport]")) { const m = document.createElement("meta"); m.name = "viewport"; m.content = "width=device-width, initial-scale=1, viewport-fit=cover"; head.insertBefore(m, head.firstChild); }
+  if (!head.querySelector("meta[charset]")) { const m = document.createElement("meta"); m.setAttribute("charset", "utf-8"); head.insertBefore(m, head.firstChild); }
+  return "<!doctype html>\n" + root.outerHTML;
+}
+$("shareSave").onclick = () => {
+  if (!STEPS.length) { showToast("请先导入地点", true); return; }
+  try { const html = shareHTML(); saveBlob(new Blob([html], { type: "text/html" }), "route-share.html"); showToast("分享页面已生成（" + (html.length / 1048576).toFixed(1) + " MB），直接发给对方用浏览器打开即可。"); }
+  catch (e) { showToast("生成失败：" + e.message, true); }
+};
+function startShare(S) {
+  document.body.classList.add("viewer");
+  try { ROWS = (S.rows || []).map(r => ({ ...r, lat: r.lat == null ? NaN : r.lat, lon: r.lon == null ? NaN : r.lon })); SRC = "分享的路线"; OV = new Map(S.ov || []); } catch (e) { }
+  try { applyCfg({ settings: S.cfg || {} }); } catch (e) { }
+  if (S.title) document.title = S.title;
+  if (innerHeight > innerWidth * 1.1) { setDims(675, 1200); cv.width = 675; cv.height = 1200; }
+  refreshData(true);
+  if (S.autoplay) setTimeout(() => play(), 700);
+  if (S.loop) setInterval(() => { if (!USERTOUCH && !playing && prog >= 1) play(); }, 2500);
+}
+if (window.__SHARE__) startShare(window.__SHARE__); else $("sample").click();
 </script>
